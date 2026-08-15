@@ -329,6 +329,38 @@
       <input id="names" class="text-input" placeholder="Daniele &amp; Simon" aria-label="Names">
       <input id="tagline" class="text-input" value="sip and solve" aria-label="Tagline">
     </div>
+    <div class="row tight" style="margin-bottom:10px">
+      <select id="namesFont" class="text-input" aria-label="Names font">
+        <option value="didone" selected>Names · Didone serif</option>
+        <option value="serif">Names · Classic serif</option>
+        <option value="sans">Names · Modern sans</option>
+        <option value="script">Names · Script</option>
+        <option value="typewriter">Names · Typewriter</option>
+      </select>
+      <label class="mini">Size
+        <input type="number" id="namesSize" class="text-input" value="210" min="60" max="400" step="10"
+          style="flex:0 1 90px" aria-label="Names size">
+      </label>
+    </div>
+    <div class="row tight" style="margin-bottom:10px">
+      <select id="taglineFont" class="text-input" aria-label="Tagline font">
+        <option value="didone">Tagline · Didone serif</option>
+        <option value="serif">Tagline · Classic serif</option>
+        <option value="sans">Tagline · Modern sans</option>
+        <option value="script" selected>Tagline · Script</option>
+        <option value="typewriter">Tagline · Typewriter</option>
+      </select>
+      <label class="mini">Size
+        <input type="number" id="taglineSize" class="text-input" value="130" min="40" max="400" step="10"
+          style="flex:0 1 90px" aria-label="Tagline size">
+      </label>
+    </div>
+
+    <label>Clue headings</label>
+    <div class="row tight" style="margin-bottom:10px">
+      <input id="acrossLabel" class="text-input" value="ACROSS" aria-label="Across heading">
+      <input id="downLabel" class="text-input" value="DOWN" aria-label="Down heading">
+    </div>
 
     <label>Poster style</label>
     <div class="row tight" style="margin-bottom:10px">
@@ -413,8 +445,8 @@
         </div>
       </div>
       <div class="clues" id="clues" hidden>
-        <div><h3>Across</h3><ol id="across"></ol></div>
-        <div><h3>Down</h3><ol id="down"></ol></div>
+        <div><h3 id="acrossH">Across</h3><ol id="across"></ol></div>
+        <div><h3 id="downH">Down</h3><ol id="down"></ol></div>
       </div>
       <div class="poster-box" id="posterBox" hidden>
         <h3>Poster</h3>
@@ -641,6 +673,10 @@ const els = {
   posterBg: $("posterBg"), posterInk: $("posterInk"), posterSize: $("posterSize"),
   posterQuality: $("posterQuality"), posterNote: $("posterNote"),
   posterW: $("posterW"), posterH: $("posterH"), sizeHint: $("sizeHint"),
+  namesFont: $("namesFont"), namesSize: $("namesSize"),
+  taglineFont: $("taglineFont"), taglineSize: $("taglineSize"),
+  acrossLabel: $("acrossLabel"), downLabel: $("downLabel"),
+  acrossH: $("acrossH"), downH: $("downH"),
 };
 
 const EXAMPLE = [
@@ -760,6 +796,10 @@ function shareLink() {
   if (els.words.value.trim()) parts.push("w=" + encodeInput(els.words.value));
   if (els.names.value.trim()) parts.push("t=" + encodeInput(els.names.value));
   if (els.tagline.value.trim()) parts.push("s=" + encodeInput(els.tagline.value));
+  if (els.acrossLabel.value.trim() && els.acrossLabel.value !== "ACROSS")
+    parts.push("a=" + encodeInput(els.acrossLabel.value));
+  if (els.downLabel.value.trim() && els.downLabel.value !== "DOWN")
+    parts.push("d=" + encodeInput(els.downLabel.value));
   return parts.length ? base + "#" + parts.join("&") : base;
 }
 
@@ -922,6 +962,8 @@ function render() {
 
   els.clues.hidden = !hasClues;
   if (hasClues) {
+    els.acrossH.textContent = els.acrossLabel.value.trim() || "Across";
+    els.downH.textContent = els.downLabel.value.trim() || "Down";
     renderClues(across, els.across);
     renderClues(down, els.down);
   }
@@ -977,10 +1019,25 @@ function step(delta) {
 
 const POSTER = {
   vw: 4000, margin: 240,      // design happens in 4000-wide virtual units
-  nameFont: (px) => 'bold ' + px + 'px "Bodoni 72", Didot, "Playfair Display", Georgia, serif',
-  tagFont: (px) => px + 'px "Snell Roundhand", "Savoye LET", "Brush Script MT", "Segoe Script", cursive',
   bodyFont: (px, weight) => (weight || "") + " " + px + 'px "Avenir Next", "Helvetica Neue", Arial, sans-serif',
 };
+
+/* System font stacks so the file needs no downloads and works offline. */
+const HEAD_FONTS = {
+  didone: { weight: "bold ", css: '"Bodoni 72", Didot, "Playfair Display", Georgia, serif' },
+  serif: { weight: "bold ", css: 'Georgia, "Times New Roman", serif' },
+  sans: { weight: "bold ", css: '"Avenir Next", "Helvetica Neue", Arial, sans-serif' },
+  script: { weight: "", css: '"Snell Roundhand", "Savoye LET", "Brush Script MT", "Segoe Script", cursive' },
+  typewriter: { weight: "bold ", css: '"American Typewriter", "Courier New", monospace' },
+};
+
+function headFont(key, px) {
+  const font = HEAD_FONTS[key] || HEAD_FONTS.didone;
+  return font.weight + px + "px " + font.css;
+}
+
+const clampNum = (value, lo, hi, fallback) =>
+  Math.min(hi, Math.max(lo, +value || fallback));
 
 /* Keep a hand-typed size drawable: each side 500-8000 px, aspect at most
    4:1 (beyond that the header alone outgrows the sheet), and total area
@@ -1034,36 +1091,45 @@ function wrapText(ctx, text, maxWidth) {
   return lines;
 }
 
-/* Header: names left, tagline right of them, shrunk together until they fit. */
+/* Header: names left, tagline right of them. The chosen sizes are a maximum;
+   both shrink by the same factor when the line would overflow the sheet. */
 function drawPosterHeader(ctx, innerW, ink) {
   const names = els.names.value.trim();
   const tagline = els.tagline.value.trim();
   if (!names && !tagline) return POSTER.margin;
 
-  let size = 210;
+  let nameSize = clampNum(els.namesSize.value, 60, 400, 210);
+  let tagSize = clampNum(els.taglineSize.value, 40, 400, 130);
+
   const measure = () => {
-    ctx.font = POSTER.nameFont(size);
+    ctx.font = headFont(els.namesFont.value, nameSize);
     const nameW = names ? ctx.measureText(names).width : 0;
-    ctx.font = POSTER.tagFont(size * 0.62);
+    ctx.font = headFont(els.taglineFont.value, tagSize);
     const tagW = tagline ? ctx.measureText(tagline).width : 0;
     return nameW + tagW + (names && tagline ? 90 : 0);
   };
-  while (size > 80 && measure() > innerW) size -= 6;
+  const total = measure();
+  if (total > innerW) {
+    const shrink = innerW / total;
+    nameSize *= shrink;
+    tagSize *= shrink;
+  }
 
-  const baseline = POSTER.margin + size * 0.85;
+  const tallest = Math.max(names ? nameSize : 0, tagline ? tagSize : 0);
+  const baseline = POSTER.margin + tallest * 0.85;
   ctx.fillStyle = ink;
   ctx.textAlign = "left";
   let x = POSTER.margin;
   if (names) {
-    ctx.font = POSTER.nameFont(size);
+    ctx.font = headFont(els.namesFont.value, nameSize);
     ctx.fillText(names, x, baseline);
     x += ctx.measureText(names).width + 90;
   }
   if (tagline) {
-    ctx.font = POSTER.tagFont(size * 0.62);
+    ctx.font = headFont(els.taglineFont.value, tagSize);
     ctx.fillText(tagline, x, baseline);
   }
-  return baseline + size * 0.45;
+  return baseline + tallest * 0.45;
 }
 
 function planClueSection(ctx, section, fs, colW) {
@@ -1172,8 +1238,10 @@ function drawPoster(layout) {
   // into "fit these words", instead of an unsolvable numbered blank.
   const clueOf = (item) => byWord.get(item.word)?.clue || item.word;
   const sections = [
-    { title: "ACROSS", items: across.map((a) => ({ n: a.n, text: clueOf(a) })) },
-    { title: "DOWN", items: down.map((d) => ({ n: d.n, text: clueOf(d) })) },
+    { title: els.acrossLabel.value.trim() || "ACROSS",
+      items: across.map((a) => ({ n: a.n, text: clueOf(a) })) },
+    { title: els.downLabel.value.trim() || "DOWN",
+      items: down.map((d) => ({ n: d.n, text: clueOf(d) })) },
   ];
 
   if (VW / VH >= 1.15) {
@@ -1230,13 +1298,21 @@ els.words.addEventListener("input", () => {
 });
 els.names.addEventListener("input", queueUrlSync);
 els.tagline.addEventListener("input", queueUrlSync);
+els.acrossLabel.addEventListener("input", queueUrlSync);
+els.downLabel.addEventListener("input", queueUrlSync);
 els.generate.addEventListener("click", run);
 els.link.addEventListener("click", copyLink);
 els.prev.addEventListener("click", () => step(-1));
 els.next.addEventListener("click", () => step(1));
 els.poster.addEventListener("click", makePoster);
-for (const control of [els.posterBg, els.posterInk, els.posterQuality]) {
+for (const control of [els.posterBg, els.posterInk, els.posterQuality, els.names,
+                       els.tagline, els.namesFont, els.namesSize, els.taglineFont,
+                       els.taglineSize, els.acrossLabel, els.downLabel]) {
   control.addEventListener("input", () => { els.posterBox.hidden = true; });
+}
+/* The clue heading labels also rename the on-screen list. */
+for (const control of [els.acrossLabel, els.downLabel]) {
+  control.addEventListener("input", () => { if (layouts.length) render(); });
 }
 
 /* Presets fill the width/height fields; touching the fields makes it custom. */
@@ -1315,6 +1391,8 @@ function restoreFromLink() {
       if (key === "w") els.words.value = value;
       else if (key === "t") els.names.value = value;
       else if (key === "s") els.tagline.value = value;
+      else if (key === "a") els.acrossLabel.value = value;
+      else if (key === "d") els.downLabel.value = value;
     } catch {
       // Truncated or mangled link: keep whatever is already in the input.
     }
