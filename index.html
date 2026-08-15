@@ -1,0 +1,1180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Crossword Generator</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --ink: #1b1d21;
+    --muted: #6b7280;
+    --line: #d9dce2;
+    --accent: #2f6df6;
+    --accent-ink: #ffffff;
+    --cell-bg: #ffffff;
+    --cell-line: #9aa1ad;
+    --cross-bg: #e4edff;
+    --warn: #b45309;
+    --warn-bg: #fef3c7;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171b;
+      --panel: #1e2126;
+      --ink: #e8eaed;
+      --muted: #9aa1ad;
+      --line: #333840;
+      --accent: #5b8cff;
+      --accent-ink: #0d1017;
+      --cell-bg: #262a31;
+      --cell-line: #58606c;
+      --cross-bg: #2c3a58;
+      --warn: #fbbf24;
+      --warn-bg: #3a2f14;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 340px minmax(0, 1fr);
+    gap: 16px;
+    padding: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+    min-height: 100%;
+    align-items: start;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px;
+  }
+
+  h1 {
+    font-size: 18px;
+    margin: 0 0 2px;
+    letter-spacing: -0.01em;
+  }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+
+  textarea {
+    width: 100%;
+    min-height: 240px;
+    resize: vertical;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row.tight { gap: 6px; }
+  .spacer { flex: 1 1 auto; }
+
+  button {
+    font: inherit;
+    font-size: 14px;
+    padding: 9px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    cursor: pointer;
+    min-height: 40px;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 600;
+    flex: 1 1 auto;
+  }
+  button.icon { min-width: 44px; padding: 9px 12px; font-size: 17px; line-height: 1; }
+
+  .counter { font-size: 13px; color: var(--muted); margin: 8px 0 10px; }
+
+  .link-out {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid var(--accent);
+    background: var(--bg);
+    color: var(--ink);
+    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .stats {
+    display: flex; flex-wrap: wrap; gap: 6px 14px;
+    font-size: 13px; color: var(--muted);
+    margin: 0 0 10px;
+  }
+  .stats b { color: var(--ink); font-weight: 600; }
+
+  .pager { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .pager .pos { font-variant-numeric: tabular-nums; font-size: 14px; min-width: 62px; text-align: center; }
+
+  .board-wrap {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px;
+    display: flex;
+    justify-content: center;
+  }
+  .board {
+    display: grid;
+    gap: 2px;
+    touch-action: pan-x pan-y;
+  }
+  .cell {
+    width: var(--cell);
+    height: var(--cell);
+    border-radius: 3px;
+  }
+  .cell.on {
+    position: relative;
+    background: var(--cell-bg);
+    border: 1px solid var(--cell-line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: calc(var(--cell) * 0.56);
+    line-height: 1;
+    text-transform: uppercase;
+  }
+  .cell.cross { background: var(--cross-bg); }
+  .cell .num {
+    position: absolute;
+    top: 0; left: 2px;
+    font-size: calc(var(--cell) * 0.3);
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--muted);
+  }
+
+  .results-table {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .results-table h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    margin: 0 0 8px;
+  }
+  .scroller { max-height: 300px; overflow: auto; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  th {
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding: 4px 10px 6px;
+    border-bottom: 1px solid var(--line);
+  }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  th.r, td.r { text-align: right; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td { background: var(--bg); }
+  tbody tr.current td { background: var(--cross-bg); font-weight: 600; }
+  tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  td.gap { color: var(--warn); }
+  td.none { color: var(--muted); }
+
+  .clues {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 24px;
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .clues h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    margin: 0 0 6px;
+  }
+  .clues ol { margin: 0; padding-left: 1.7em; font-size: 13.5px; }
+  .clues li { margin-bottom: 5px; }
+  .clues li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .clues .missing { color: var(--muted); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chip {
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .chip.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+
+  .empty { color: var(--muted); text-align: center; padding: 48px 12px; }
+
+  .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+
+  @media screen and (max-width: 860px) {
+    .app { grid-template-columns: minmax(0, 1fr); padding: 10px; gap: 10px; }
+    textarea { min-height: 150px; }
+    h1 { font-size: 17px; }
+    .clues { grid-template-columns: 1fr; }
+  }
+
+  .text-input {
+    flex: 1 1 120px;
+    min-width: 0;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--ink);
+    font: inherit;
+    font-size: 14px;
+  }
+  .text-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .poster-box {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .poster-box h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    margin: 0 0 8px;
+  }
+  .poster-box img {
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+  }
+  .poster-box .row { margin-top: 8px; }
+  .poster-box a { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="app">
+  <section class="card">
+    <h1>Crossword Generator</h1>
+    <p class="sub">Enter your words, get interlocking layouts.</p>
+
+    <label for="words">One answer per line, with an optional clue after a colon</label>
+    <textarea id="words" spellcheck="false" autocapitalize="sentences" autocomplete="off"
+      placeholder="VENICE: Where did we get engaged?&#10;CHOCOLATE: The cake is chocolate with raspberry.&#10;CONFETTI"></textarea>
+    <div class="counter" id="counter">0 words</div>
+
+    <label>Poster heading</label>
+    <div class="row tight" style="margin-bottom:10px">
+      <input id="names" class="text-input" placeholder="Daniele &amp; Simon" aria-label="Names">
+      <input id="tagline" class="text-input" value="sip and solve" aria-label="Tagline">
+    </div>
+
+    <div class="row">
+      <button class="primary" id="generate">Generate</button>
+      <button id="link">Copy link</button>
+      <button id="example">Example</button>
+      <button id="clear">Clear</button>
+    </div>
+    <input id="linkOut" class="link-out" readonly hidden aria-label="Shareable link">
+    <p class="note">
+      <b>Copy link</b> puts the whole list — answers and clues — into a link you can
+      send to yourself or a co-conspirator. Opening it restores the input and generates
+      straight away. The address bar keeps up as you type, so a refresh never loses your work.
+    </p>
+    <p class="note">
+      A clue ending in <b>?</b> is kept as a question. Anything else is treated as a
+      sentence, and the answer is blanked out for you wherever it appears — or write
+      your own <b>___</b>. Lines without a clue may list several words separated by commas.
+    </p>
+    <p class="note">Layouts are searched with randomized restarts, so pressing Generate again gives you a fresh set of alternatives.</p>
+  </section>
+
+  <section class="card">
+    <div id="results" hidden>
+      <div class="pager">
+        <button class="icon" id="prev" aria-label="Previous layout">‹</button>
+        <span class="pos" id="pos">1 / 1</span>
+        <button class="icon" id="next" aria-label="Next layout">›</button>
+        <button id="blank">Hide letters</button>
+        <button id="poster">Make poster</button>
+        <span class="spacer"></span>
+        <span class="stats" id="time"></span>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div class="board-wrap" id="boardWrap"><div class="board" id="board"></div></div>
+      <div class="chips" id="unplaced"></div>
+      <div class="results-table">
+        <h3>All results — pick one</h3>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th class="r">Words</th>
+                <th class="r">Crossings</th>
+                <th class="r">Grid</th>
+                <th class="r">Cells</th>
+                <th>Not placed</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="clues" id="clues" hidden>
+        <div><h3>Across</h3><ol id="across"></ol></div>
+        <div><h3>Down</h3><ol id="down"></ol></div>
+      </div>
+      <div class="poster-box" id="posterBox" hidden>
+        <h3>Poster</h3>
+        <img id="posterImg" alt="Generated crossword poster">
+        <div class="row">
+          <a id="posterDl" download="crossword-poster.png">Download PNG</a>
+          <span class="note" style="margin:0">4000 × 3000 px — prints sharp up to 50 × 38 cm (20 × 15 in)</span>
+        </div>
+      </div>
+    </div>
+    <div class="empty" id="empty">Add at least two words and press Generate.</div>
+  </section>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------------------
+   Grid: sparse crossword board.
+   A cell knows its letter and whether it belongs to a horizontal and/or
+   vertical word. Letters are indexed by character so finding intersection
+   candidates is O(occurrences of that letter) instead of a full grid scan.
+--------------------------------------------------------------------------- */
+class Grid {
+  constructor() {
+    this.cells = new Map();      // "r,c" -> {r, c, ch, h, v}
+    this.byChar = new Map();     // "A" -> [cell, ...]
+    this.words = [];             // {word, r, c, horiz}
+    this.crossings = 0;
+    this.minR = 0; this.maxR = 0; this.minC = 0; this.maxC = 0;
+  }
+
+  at(r, c) { return this.cells.get(r + "," + c); }
+
+  width() { return this.maxC - this.minC + 1; }
+  height() { return this.maxR - this.minR + 1; }
+
+  /* Returns the number of intersections, or null when the word does not fit. */
+  fit(word, r, c, horiz) {
+    const dr = horiz ? 0 : 1, dc = horiz ? 1 : 0;
+    const pr = horiz ? 1 : 0, pc = horiz ? 0 : 1;   // perpendicular offset
+
+    // The cells just before and just after the word must be free, otherwise
+    // we would silently extend a neighbouring word.
+    if (this.at(r - dr, c - dc)) return null;
+    if (this.at(r + dr * word.length, c + dc * word.length)) return null;
+
+    let crossings = 0;
+    for (let i = 0; i < word.length; i++) {
+      const rr = r + dr * i, cc = c + dc * i;
+      const cell = this.at(rr, cc);
+      if (cell) {
+        if (cell.ch !== word[i]) return null;              // letter clash
+        if (horiz ? cell.h : cell.v) return null;          // already runs this way
+        crossings++;
+      } else {
+        // An empty cell may not touch anything sideways, that would create
+        // an unintended two-letter word.
+        if (this.at(rr - pr, cc - pc) || this.at(rr + pr, cc + pc)) return null;
+      }
+    }
+    return crossings;
+  }
+
+  place(word, r, c, horiz) {
+    const dr = horiz ? 0 : 1, dc = horiz ? 1 : 0;
+    for (let i = 0; i < word.length; i++) {
+      const rr = r + dr * i, cc = c + dc * i;
+      let cell = this.at(rr, cc);
+      if (cell) {
+        this.crossings++;
+      } else {
+        cell = { r: rr, c: cc, ch: word[i], h: false, v: false };
+        this.cells.set(rr + "," + cc, cell);
+        let list = this.byChar.get(cell.ch);
+        if (!list) this.byChar.set(cell.ch, list = []);
+        list.push(cell);
+      }
+      if (horiz) cell.h = true; else cell.v = true;
+    }
+    if (this.words.length === 0) {
+      this.minR = this.maxR = r; this.minC = this.maxC = c;
+    }
+    this.minR = Math.min(this.minR, r);
+    this.minC = Math.min(this.minC, c);
+    this.maxR = Math.max(this.maxR, r + dr * (word.length - 1));
+    this.maxC = Math.max(this.maxC, c + dc * (word.length - 1));
+    this.words.push({ word, r, c, horiz });
+  }
+
+  /* How attractive is this placement: crossings are good, growth is not. */
+  rate(word, r, c, horiz, crossings) {
+    const dr = horiz ? 0 : 1, dc = horiz ? 1 : 0;
+    const w = Math.max(this.maxC, c + dc * (word.length - 1)) - Math.min(this.minC, c) + 1;
+    const h = Math.max(this.maxR, r + dr * (word.length - 1)) - Math.min(this.minR, r) + 1;
+    const grown = w * h - this.width() * this.height();
+    return crossings * 10 - grown * 0.12 - Math.abs(w - h) * 0.5;
+  }
+
+  /* Trimmed grid as rows of letters, spaces for holes. Used for de-duping. */
+  rows() {
+    const out = [];
+    for (let r = this.minR; r <= this.maxR; r++) {
+      let line = "";
+      for (let c = this.minC; c <= this.maxC; c++) {
+        const cell = this.at(r, c);
+        line += cell ? cell.ch : " ";
+      }
+      out.push(line);
+    }
+    return out;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Search
+--------------------------------------------------------------------------- */
+
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* Best spot for `word` on `grid`, picked from the top few candidates so that
+   different restarts explore different layouts. */
+function findSpot(grid, word, rnd) {
+  const candidates = [];
+  for (let i = 0; i < word.length; i++) {
+    const anchors = grid.byChar.get(word[i]);
+    if (!anchors) continue;
+    for (let a = 0; a < anchors.length; a++) {
+      const cell = anchors[a];
+      if (cell.h && cell.v) continue;              // already crossed, no room
+      const horiz = cell.v;                        // cross the existing word
+      const r = horiz ? cell.r : cell.r - i;
+      const c = horiz ? cell.c - i : cell.c;
+      const crossings = grid.fit(word, r, c, horiz);
+      if (crossings === null) continue;
+      candidates.push({ r, c, horiz, score: grid.rate(word, r, c, horiz, crossings) + rnd() * 1.5 });
+    }
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[Math.floor(rnd() * Math.min(candidates.length, 3))];
+}
+
+/* One randomized greedy build. Long words first, lightly shuffled. */
+function buildLayout(words, rnd) {
+  const order = words.slice().sort((a, b) => b.length - a.length);
+  for (let i = 0; i < order.length - 1; i++) {
+    if (rnd() < 0.4) {
+      const j = Math.min(order.length - 1, i + 1 + Math.floor(rnd() * 3));
+      const t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+  }
+
+  const grid = new Grid();
+  grid.place(order[0], 0, 0, true);
+
+  let pending = order.slice(1);
+  let progressed = true;
+  while (pending.length && progressed) {
+    progressed = false;
+    const stuck = [];
+    for (const word of pending) {
+      const spot = findSpot(grid, word, rnd);
+      if (spot) {
+        grid.place(word, spot.r, spot.c, spot.horiz);
+        progressed = true;
+      } else {
+        stuck.push(word);        // may still fit once more words are down
+      }
+    }
+    pending = stuck;
+  }
+  return { grid, unplaced: pending };
+}
+
+function scoreLayout(result) {
+  const g = result.grid;
+  return g.words.length * 1000
+       + g.crossings * 12
+       - g.width() * g.height() * 0.08
+       - Math.abs(g.width() - g.height()) * 1.5;
+}
+
+/* Randomized restarts within a time budget; keeps the best distinct layouts. */
+function generate(words, { budgetMs = 300, maxResults = 12, maxAttempts = 3000 } = {}) {
+  const started = performance.now();
+  const rnd = mulberry32((Math.random() * 2 ** 32) | 0);
+  const seen = new Map();
+  let attempts = 0;
+
+  while (attempts < maxAttempts && performance.now() - started < budgetMs) {
+    attempts++;
+    const result = buildLayout(words, rnd);
+    const key = result.grid.rows().join("\n");
+    if (seen.has(key)) continue;
+    result.score = scoreLayout(result);
+    seen.set(key, result);
+  }
+
+  const layouts = [...seen.values()].sort((a, b) => b.score - a.score).slice(0, maxResults);
+  return { layouts, attempts, ms: performance.now() - started };
+}
+
+/* ---------------------------------------------------------------------------
+   UI
+--------------------------------------------------------------------------- */
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  words: $("words"), counter: $("counter"), generate: $("generate"),
+  example: $("example"), clear: $("clear"), results: $("results"), empty: $("empty"),
+  prev: $("prev"), next: $("next"), pos: $("pos"), stats: $("stats"), time: $("time"),
+  board: $("board"), boardWrap: $("boardWrap"), unplaced: $("unplaced"), poster: $("poster"),
+  blank: $("blank"), clues: $("clues"), across: $("across"), down: $("down"), tbody: $("tbody"),
+  link: $("link"), linkOut: $("linkOut"), names: $("names"), tagline: $("tagline"),
+  posterBox: $("posterBox"), posterImg: $("posterImg"), posterDl: $("posterDl"),
+};
+
+const EXAMPLE = [
+  "VENICE: Where did we get engaged?",
+  "CHOCOLATE: The cake is chocolate with raspberry.",
+  "SUNFLOWER: Which flower is in the bouquet?",
+  "CHAMPAGNE: What are we toasting with?",
+  "DANCEFLOOR: Where you will find us after dinner?",
+  "MINIGOLF: Our very first date was ___.",
+  "SATURDAY: The wedding is on a Saturday in June.",
+  "CONFETTI: What gets thrown at us on the way out?",
+  "PROSECCO, RINGS, SPEECHES",
+].join("\n");
+
+let entries = [];        // [{word, clue, kind}]
+let layouts = [];
+let index = 0;
+let showLetters = true;
+
+const normalize = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase();
+
+/* Hide the answer wherever it shows up in a sentence clue, so the clue does
+   not give itself away. Matching is done on normalized tokens, so "Venice"
+   and "VENICE" both count. */
+function blankAnswer(sentence, word) {
+  return sentence.replace(/[\p{L}\p{M}]+/gu, (token) =>
+    normalize(token) === word ? "_____" : token);
+}
+
+/* Each line is either "ANSWER: clue" or one or more bare words. */
+function parseEntries(text) {
+  const seen = new Set();
+  const out = [];
+
+  const add = (raw, clueText) => {
+    const word = normalize(raw).replace(/[^\p{L}]/gu, "");
+    if (word.length < 2 || seen.has(word)) return;
+    seen.add(word);
+
+    let clue = null, kind = "none";
+    if (clueText) {
+      kind = /\?\s*$/.test(clueText) ? "question" : "sentence";
+      clue = kind === "sentence" ? blankAnswer(clueText, word) : clueText;
+    }
+    out.push({ word, clue, kind });
+  };
+
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const split = line.match(/^([^:=]+)[:=]([\s\S]*)$/);
+    if (split && split[2].trim()) {
+      add(split[1], split[2].trim());
+    } else {
+      // No clue on this line, so it may hold several words.
+      for (const token of (split ? split[1] : line).split(/[^\p{L}\p{M}]+/u)) add(token, null);
+    }
+  }
+  return out.slice(0, 80);
+}
+
+function updateCounter() {
+  const parsed = parseEntries(els.words.value);
+  const clued = parsed.filter((e) => e.clue).length;
+  const words = parsed.length === 1 ? "1 word (need at least 2)" : parsed.length + " words";
+  els.counter.textContent = clued
+    ? words + " · " + clued + " with a clue"
+    : words;
+  els.generate.disabled = parsed.length < 2;
+}
+
+/* Standard crossword numbering: word starts numbered in reading order, a
+   shared start cell gets one number for both directions. */
+function numberLayout(grid) {
+  const starts = new Map();
+  for (const w of grid.words) {
+    const key = w.r + "," + w.c;
+    let start = starts.get(key);
+    if (!start) starts.set(key, start = { r: w.r, c: w.c, across: null, down: null });
+    if (w.horiz) start.across = w.word; else start.down = w.word;
+  }
+
+  const numbers = new Map();
+  const across = [], down = [];
+  [...starts.values()]
+    .sort((a, b) => a.r - b.r || a.c - b.c)
+    .forEach((start, i) => {
+      const n = i + 1;
+      numbers.set(start.r + "," + start.c, n);
+      if (start.across) across.push({ n, word: start.across });
+      if (start.down) down.push({ n, word: start.down });
+    });
+  return { numbers, across, down };
+}
+
+/* ---------------------------------------------------------------------------
+   Shareable link: the input lives in the URL fragment, base64url encoded so
+   colons, line breaks and accents survive the trip.
+--------------------------------------------------------------------------- */
+
+function encodeInput(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeInput(code) {
+  let base64 = code.replace(/-/g, "+").replace(/_/g, "/");
+  base64 += "=".repeat((4 - base64.length % 4) % 4);
+  const binary = atob(base64);
+  return new TextDecoder().decode(Uint8Array.from(binary, (ch) => ch.charCodeAt(0)));
+}
+
+function shareLink() {
+  const base = location.href.split("#")[0];
+  const parts = [];
+  if (els.words.value.trim()) parts.push("w=" + encodeInput(els.words.value));
+  if (els.names.value.trim()) parts.push("t=" + encodeInput(els.names.value));
+  if (els.tagline.value.trim()) parts.push("s=" + encodeInput(els.tagline.value));
+  return parts.length ? base + "#" + parts.join("&") : base;
+}
+
+/* Keep the address bar in step with the textarea, so a reload keeps the list.
+   Some browsers refuse replaceState on file:// URLs; the button still works. */
+function syncUrl() {
+  try {
+    history.replaceState(null, "", shareLink());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function copyLink() {
+  const url = shareLink();
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(url);
+    copied = true;
+  } catch {
+    const helper = document.createElement("textarea");
+    helper.value = url;
+    helper.style.position = "fixed";
+    helper.style.opacity = "0";
+    document.body.appendChild(helper);
+    helper.select();
+    try { copied = document.execCommand("copy"); } catch { copied = false; }
+    helper.remove();
+  }
+  els.link.textContent = copied ? "Copied!" : "Copy it here →";
+  setTimeout(() => { els.link.textContent = "Copy link"; }, 1600);
+
+  // If the browser refused the clipboard, show the link ready to be copied by hand.
+  els.linkOut.hidden = copied;
+  if (!copied) {
+    els.linkOut.value = url;
+    els.linkOut.focus();
+    els.linkOut.select();
+  }
+}
+
+/* Overview of every layout found, ordered best first. Rows select a layout. */
+function renderTable() {
+  const frag = document.createDocumentFragment();
+
+  layouts.forEach((layout, i) => {
+    const grid = layout.grid;
+    const tr = document.createElement("tr");
+    tr.tabIndex = 0;
+    if (i === index) {
+      tr.className = "current";
+      tr.setAttribute("aria-current", "true");
+    }
+
+    const columns = [
+      { text: String(i + 1) },
+      { text: grid.words.length + " / " + entries.length, cls: "r" },
+      { text: String(grid.crossings), cls: "r" },
+      { text: grid.width() + " × " + grid.height(), cls: "r" },
+      { text: String(grid.cells.size), cls: "r" },
+      layout.unplaced.length
+        ? { text: layout.unplaced.join(", "), cls: "gap" }
+        : { text: "—", cls: "none" },
+    ];
+
+    for (const col of columns) {
+      const td = document.createElement("td");
+      td.textContent = col.text;
+      if (col.cls) td.className = col.cls;
+      tr.appendChild(td);
+    }
+
+    const select = () => { index = i; render(); };
+    tr.addEventListener("click", select);
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(); }
+    });
+    frag.appendChild(tr);
+  });
+
+  els.tbody.replaceChildren(frag);
+}
+
+function renderClues(list, target) {
+  const byWord = new Map(entries.map((e) => [e.word, e]));
+  target.replaceChildren();
+  for (const item of list) {
+    const li = document.createElement("li");
+    li.value = item.n;
+    const clue = byWord.get(item.word)?.clue;
+    if (clue) {
+      li.textContent = clue;
+    } else {
+      li.textContent = showLetters ? item.word : "—";
+      li.className = "missing";
+    }
+    target.appendChild(li);
+  }
+}
+
+function cellSize(cols, rows) {
+  const available = els.boardWrap.clientWidth - 12;
+  const byWidth = Math.floor((available - (cols - 1) * 2) / cols);
+  const tallLimit = Math.floor((window.innerHeight * 0.7 - (rows - 1) * 2) / rows);
+  return Math.max(14, Math.min(40, byWidth, tallLimit));
+}
+
+function render() {
+  if (layouts.length === 0) {
+    els.results.hidden = true;
+    els.empty.hidden = false;
+    return;
+  }
+  els.results.hidden = false;
+  els.empty.hidden = true;
+  els.posterBox.hidden = true;   // a new view makes the old poster stale
+
+  const { grid, unplaced } = layouts[index];
+  const rows = grid.rows();
+  const cols = grid.width();
+  const hasClues = entries.some((e) => e.clue);
+  const { numbers, across, down } = numberLayout(grid);
+
+  els.pos.textContent = (index + 1) + " / " + layouts.length;
+  els.prev.disabled = els.next.disabled = layouts.length < 2;
+  els.stats.innerHTML =
+    "<span><b>" + grid.words.length + "</b> words placed</span>" +
+    "<span><b>" + grid.crossings + "</b> crossings</span>" +
+    "<span><b>" + cols + " × " + rows.length + "</b> grid</span>";
+
+  els.board.style.setProperty("--cell", cellSize(cols, rows.length) + "px");
+  els.board.style.gridTemplateColumns = "repeat(" + cols + ", var(--cell))";
+
+  const frag = document.createDocumentFragment();
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < cols; c++) {
+      const rr = grid.minR + r, cc = grid.minC + c;
+      const cell = grid.at(rr, cc);
+      const div = document.createElement("div");
+      if (cell) {
+        div.className = cell.h && cell.v && showLetters ? "cell on cross" : "cell on";
+        if (showLetters) div.textContent = cell.ch;
+        const n = hasClues ? numbers.get(rr + "," + cc) : undefined;
+        if (n !== undefined) {
+          const tag = document.createElement("span");
+          tag.className = "num";
+          tag.textContent = n;
+          div.appendChild(tag);
+        }
+      } else {
+        div.className = "cell";
+      }
+      frag.appendChild(div);
+    }
+  }
+  els.board.replaceChildren(frag);
+
+  renderTable();
+
+  els.clues.hidden = !hasClues;
+  if (hasClues) {
+    renderClues(across, els.across);
+    renderClues(down, els.down);
+  }
+
+  els.unplaced.replaceChildren();
+  if (unplaced.length) {
+    const label = document.createElement("span");
+    label.className = "chip warn";
+    label.textContent = "no overlap found:";
+    els.unplaced.appendChild(label);
+    for (const word of unplaced) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = word;
+      els.unplaced.appendChild(chip);
+    }
+  }
+}
+
+function run() {
+  entries = parseEntries(els.words.value);
+  if (entries.length < 2) return;
+  const words = entries.map((e) => e.word);
+
+  els.generate.disabled = true;
+  els.generate.textContent = "Generating…";
+
+  // Let the button repaint before the (short) synchronous search. setTimeout,
+  // not requestAnimationFrame: rAF never fires in a hidden tab, which would
+  // leave a background-opened share link stuck on "Generating…".
+  setTimeout(() => {
+    const { layouts: found, attempts, ms } = generate(words);
+    layouts = found;
+    index = 0;
+    els.time.textContent = attempts + " layouts tried in " + Math.round(ms) + " ms";
+    render();
+    els.generate.disabled = false;
+    els.generate.textContent = "Generate";
+  }, 20);
+}
+
+function step(delta) {
+  if (layouts.length < 2) return;
+  index = (index + delta + layouts.length) % layouts.length;
+  render();
+}
+
+/* ---------------------------------------------------------------------------
+   Poster: the current layout drawn on a canvas in the classic wedding-sign
+   style — names top left, script tagline, clues on the left, blank numbered
+   grid on the right. 4000x3000 stays inside mobile Safari's canvas limit.
+--------------------------------------------------------------------------- */
+
+const POSTER = {
+  w: 4000, h: 3000, margin: 240,
+  nameFont: (px) => 'bold ' + px + 'px "Bodoni 72", Didot, "Playfair Display", Georgia, serif',
+  tagFont: (px) => px + 'px "Snell Roundhand", "Savoye LET", "Brush Script MT", "Segoe Script", cursive',
+  bodyFont: (px, weight) => (weight || "") + " " + px + 'px "Avenir Next", "Helvetica Neue", Arial, sans-serif',
+};
+
+function wrapText(ctx, text, maxWidth) {
+  const lines = [];
+  let line = "";
+  for (const word of text.split(/\s+/)) {
+    const test = line ? line + " " + word : word;
+    if (!line || ctx.measureText(test).width <= maxWidth) line = test;
+    else { lines.push(line); line = word; }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+/* Header: names left, tagline right of them, shrunk together until they fit. */
+function drawPosterHeader(ctx, innerW) {
+  const names = els.names.value.trim();
+  const tagline = els.tagline.value.trim();
+  if (!names && !tagline) return POSTER.margin;
+
+  let size = 210;
+  const measure = () => {
+    ctx.font = POSTER.nameFont(size);
+    const nameW = names ? ctx.measureText(names).width : 0;
+    ctx.font = POSTER.tagFont(size * 0.62);
+    const tagW = tagline ? ctx.measureText(tagline).width : 0;
+    return nameW + tagW + (names && tagline ? 90 : 0);
+  };
+  while (size > 80 && measure() > innerW) size -= 6;
+
+  const baseline = POSTER.margin + size * 0.85;
+  ctx.fillStyle = "#000";
+  ctx.textAlign = "left";
+  let x = POSTER.margin;
+  if (names) {
+    ctx.font = POSTER.nameFont(size);
+    ctx.fillText(names, x, baseline);
+    x += ctx.measureText(names).width + 90;
+  }
+  if (tagline) {
+    ctx.font = POSTER.tagFont(size * 0.62);
+    ctx.fillText(tagline, x, baseline);
+  }
+  return baseline + size * 0.45;
+}
+
+/* Clue column: shrink the font until Across + Down fit the available height. */
+function drawPosterClues(ctx, sections, x, top, colW, colH) {
+  const layout = (fs) => {
+    const lineH = fs * 1.38, numW = fs * 2.1;
+    const rows = [];
+    let y = 0;
+    for (const section of sections) {
+      if (!section.items.length) continue;
+      y += fs * 0.6;
+      rows.push({ heading: section.title, y: y + fs, fs });
+      y += fs * 1.9;
+      for (const item of section.items) {
+        ctx.font = POSTER.bodyFont(fs);
+        const lines = wrapText(ctx, item.text, colW - numW);
+        rows.push({ num: item.n + ".", lines, y, fs, lineH, numW });
+        y += lines.length * lineH + fs * 0.35;
+      }
+    }
+    return { rows, height: y };
+  };
+
+  let fs = 60, plan = layout(fs);
+  while (fs > 26 && plan.height > colH) { fs -= 2; plan = layout(fs); }
+
+  ctx.fillStyle = "#000";
+  ctx.textAlign = "left";
+  for (const row of plan.rows) {
+    if (row.heading) {
+      ctx.font = POSTER.bodyFont(row.fs * 1.05, "bold");
+      ctx.fillText(row.heading, x, top + row.y);
+      const w = ctx.measureText(row.heading).width;
+      ctx.fillRect(x, top + row.y + row.fs * 0.28, w, Math.max(3, row.fs * 0.07));
+    } else {
+      ctx.font = POSTER.bodyFont(row.fs);
+      ctx.fillText(row.num, x, top + row.y + row.fs);
+      row.lines.forEach((line, i) => {
+        ctx.fillText(line, x + row.numW, top + row.y + row.fs + i * row.lineH);
+      });
+    }
+  }
+}
+
+function drawPosterGrid(ctx, grid, numbers, x, top, areaW, areaH) {
+  const cols = grid.width(), rows = grid.height();
+  const cell = Math.min(170, areaW / cols, areaH / rows);
+  const gx = x + (areaW - cell * cols) / 2;
+  const gy = top + (areaH - cell * rows) / 2;
+  const lw = Math.max(3, cell * 0.04);
+
+  ctx.lineWidth = lw;
+  ctx.strokeStyle = "#000";
+  ctx.fillStyle = "#000";
+  for (const cellData of grid.cells.values()) {
+    const cx = gx + (cellData.c - grid.minC) * cell;
+    const cy = gy + (cellData.r - grid.minR) * cell;
+    ctx.strokeRect(cx, cy, cell, cell);
+    const n = numbers.get(cellData.r + "," + cellData.c);
+    if (n !== undefined) {
+      ctx.font = POSTER.bodyFont(Math.round(cell * 0.26), "600");
+      ctx.fillText(n, cx + cell * 0.09, cy + cell * 0.32);
+    }
+  }
+}
+
+function drawPoster(layout) {
+  const canvas = document.createElement("canvas");
+  canvas.width = POSTER.w;
+  canvas.height = POSTER.h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, POSTER.w, POSTER.h);
+
+  const innerW = POSTER.w - POSTER.margin * 2;
+  const headerBottom = drawPosterHeader(ctx, innerW);
+  const top = headerBottom + 110;
+  const contentH = POSTER.h - POSTER.margin - top;
+
+  const grid = layout.grid;
+  const { numbers, across, down } = numberLayout(grid);
+  const byWord = new Map(entries.map((e) => [e.word, e]));
+  // A word without a clue is listed as itself: the puzzle degrades gracefully
+  // into "fit these words", instead of an unsolvable numbered blank.
+  const clueOf = (item) => byWord.get(item.word)?.clue || item.word;
+  const sections = [
+    { title: "ACROSS", items: across.map((a) => ({ n: a.n, text: clueOf(a) })) },
+    { title: "DOWN", items: down.map((d) => ({ n: d.n, text: clueOf(d) })) },
+  ];
+
+  const clueW = innerW * 0.3;
+  drawPosterClues(ctx, sections, POSTER.margin, top, clueW, contentH);
+  drawPosterGrid(ctx, grid, numbers, POSTER.margin + clueW + 100, top,
+                 innerW - clueW - 100, contentH);
+  return canvas;
+}
+
+let posterUrl = null;
+function makePoster() {
+  if (layouts.length === 0) return;
+  els.poster.disabled = true;
+  els.poster.textContent = "Drawing…";
+  setTimeout(() => {
+    drawPoster(layouts[index]).toBlob((blob) => {
+      if (posterUrl) URL.revokeObjectURL(posterUrl);
+      posterUrl = URL.createObjectURL(blob);
+      els.posterImg.src = posterUrl;
+      els.posterDl.href = posterUrl;
+      els.posterBox.hidden = false;
+      els.poster.disabled = false;
+      els.poster.textContent = "Make poster";
+      els.posterBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, "image/png");
+  }, 20);
+}
+
+let urlTimer;
+const queueUrlSync = () => {
+  clearTimeout(urlTimer);
+  urlTimer = setTimeout(syncUrl, 400);
+};
+els.words.addEventListener("input", () => {
+  updateCounter();
+  queueUrlSync();
+});
+els.names.addEventListener("input", queueUrlSync);
+els.tagline.addEventListener("input", queueUrlSync);
+els.generate.addEventListener("click", run);
+els.link.addEventListener("click", copyLink);
+els.prev.addEventListener("click", () => step(-1));
+els.next.addEventListener("click", () => step(1));
+els.poster.addEventListener("click", makePoster);
+els.blank.addEventListener("click", () => {
+  showLetters = !showLetters;
+  els.blank.textContent = showLetters ? "Hide letters" : "Show letters";
+  render();
+});
+els.clear.addEventListener("click", () => {
+  els.words.value = "";
+  layouts = [];
+  entries = [];
+  updateCounter();
+  syncUrl();
+  render();
+  els.words.focus();
+});
+els.example.addEventListener("click", () => {
+  els.words.value = EXAMPLE;
+  if (!els.names.value.trim()) els.names.value = "Daniele & Simon";
+  updateCounter();
+  syncUrl();
+  run();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.target === els.words) return;
+  if (e.key === "ArrowLeft") step(-1);
+  if (e.key === "ArrowRight") step(1);
+});
+
+// Swipe between layouts on touch screens.
+let touchX = null, touchY = null;
+els.boardWrap.addEventListener("touchstart", (e) => {
+  touchX = e.touches[0].clientX; touchY = e.touches[0].clientY;
+}, { passive: true });
+els.boardWrap.addEventListener("touchend", (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  const dy = e.changedTouches[0].clientY - touchY;
+  if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) step(dx < 0 ? 1 : -1);
+  touchX = touchY = null;
+}, { passive: true });
+
+let resizeTimer;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(render, 100);
+});
+
+/* A shared link fills the input and generates immediately. */
+function restoreFromLink() {
+  for (const part of location.hash.slice(1).split("&")) {
+    const eq = part.indexOf("=");
+    if (eq < 1) continue;
+    const key = part.slice(0, eq);
+    try {
+      const value = decodeInput(part.slice(eq + 1));
+      if (key === "w") els.words.value = value;
+      else if (key === "t") els.names.value = value;
+      else if (key === "s") els.tagline.value = value;
+    } catch {
+      // Truncated or mangled link: keep whatever is already in the input.
+    }
+  }
+  updateCounter();
+  if (parseEntries(els.words.value).length >= 2) run();
+}
+
+/* Pasting a link into an already open tab only changes the fragment, which is
+   not a reload. replaceState does not fire this, so there is no loop. */
+window.addEventListener("hashchange", restoreFromLink);
+
+restoreFromLink();
+</script>
+</body>
+</html>
