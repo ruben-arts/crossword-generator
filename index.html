@@ -351,7 +351,8 @@
     color: var(--muted);
     margin: 0 0 8px;
   }
-  .poster-box img {
+  .poster-box canvas {
+    display: block;
     width: 100%;
     height: auto;
     border: 1px solid var(--line);
@@ -474,7 +475,7 @@
         <span class="pos" id="pos">1 / 1</span>
         <button class="icon" id="next" aria-label="Next layout">›</button>
         <button id="blank">Hide letters</button>
-        <button id="poster">Make poster</button>
+        <button id="poster" title="The poster updates by itself; this forces a redraw">Redraw poster</button>
         <span class="spacer"></span>
         <span class="stats" id="time"></span>
       </div>
@@ -505,9 +506,9 @@
       </div>
       <div class="poster-box" id="posterBox" hidden>
         <h3>Poster</h3>
-        <img id="posterImg" alt="Generated crossword poster">
+        <canvas id="posterImg" role="img" aria-label="Generated crossword poster"></canvas>
         <div class="row">
-          <a id="posterDl" download="crossword-poster.png">Download</a>
+          <a id="posterDl" href="#" download="crossword-poster.png">Download</a>
           <span class="note" style="margin:0" id="posterNote"></span>
         </div>
       </div>
@@ -968,11 +969,13 @@ function render() {
   if (layouts.length === 0) {
     els.results.hidden = true;
     els.empty.hidden = false;
+    els.posterBox.hidden = true;
+    clearTimeout(posterTimer);
     return;
   }
   els.results.hidden = false;
   els.empty.hidden = true;
-  els.posterBox.hidden = true;   // a new view makes the old poster stale
+  queuePoster();                 // the poster follows whatever is shown
 
   const { grid, unplaced } = layouts[index];
   const rows = grid.rows();
@@ -1267,12 +1270,15 @@ function drawPosterGrid(ctx, grid, numbers, x, top, areaW, areaH, ink) {
   }
 }
 
-function drawPoster(layout) {
+/* Draws the poster onto `canvas` (a fresh one when omitted). Drawing takes a
+   few milliseconds; only encoding to a PNG/JPEG file is slow, so the live
+   preview reuses the on-page canvas and never encodes. */
+function drawPoster(layout, canvas = document.createElement("canvas")) {
   const st = posterStyle();
-  const canvas = document.createElement("canvas");
-  canvas.width = st.w;
+  canvas.width = st.w;          // setting the size also clears the canvas
   canvas.height = st.h;
   const ctx = canvas.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = st.bg;
   ctx.fillRect(0, 0, st.w, st.h);
 
@@ -1317,31 +1323,60 @@ function drawPoster(layout) {
   return canvas;
 }
 
-let posterUrl = null;
+/* The poster follows the puzzle: any change to the shown layout or to a
+   poster setting redraws it straight onto the on-page canvas, which takes a
+   few milliseconds. The slow part, encoding to a PNG/JPEG file (~1 s), only
+   happens when Download is clicked, and only for the poster shown then. */
+let posterTimer = null;
+let posterCount = 0;      // bumped per draw; the download must match the shown poster
+
 function makePoster() {
   if (layouts.length === 0) return;
   const st = posterStyle();
-  els.poster.disabled = true;
-  els.poster.textContent = "Drawing…";
-  setTimeout(() => {
-    drawPoster(layouts[index]).toBlob((blob) => {
-      if (posterUrl) URL.revokeObjectURL(posterUrl);
-      posterUrl = URL.createObjectURL(blob);
-      els.posterImg.src = posterUrl;
-      els.posterDl.href = posterUrl;
-      els.posterDl.download = "crossword-poster." + st.ext;
-      els.posterDl.textContent = "Download " + st.ext.toUpperCase();
-      els.posterNote.textContent =
-        st.w + " × " + st.h + " px · " +
-        Math.round((st.w / 200) * 2.54) + " × " + Math.round((st.h / 200) * 2.54) +
-        " cm at print quality · " + Math.round(blob.size / 1024) + " KB";
-      els.posterBox.hidden = false;
-      els.poster.disabled = false;
-      els.poster.textContent = "Make poster";
-      els.posterBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }, st.mime, st.quality);
-  }, 20);
+  posterCount++;
+  drawPoster(layouts[index], els.posterImg);
+  els.posterDl.href = "#";                    // previous file no longer matches
+  delete els.posterDl.dataset.ready;
+  els.posterDl.download = "crossword-poster." + st.ext;
+  els.posterDl.textContent = "Download " + st.ext.toUpperCase();
+  els.posterNote.textContent =
+    st.w + " × " + st.h + " px · " +
+    Math.round((st.w / 200) * 2.54) + " × " + Math.round((st.h / 200) * 2.54) +
+    " cm at print quality";
+  els.posterBox.hidden = false;
 }
+
+/* Coalesce bursts (typing, clicking through the table) into one draw. */
+function queuePoster() {
+  if (layouts.length === 0) return;
+  clearTimeout(posterTimer);
+  posterTimer = setTimeout(makePoster, 80);
+}
+
+/* Encode on demand: the link is a placeholder until clicked, then the current
+   canvas is turned into a file and the download is triggered for real. */
+let posterUrl = null;
+els.posterDl.addEventListener("click", (e) => {
+  if (els.posterDl.dataset.ready === String(posterCount)) return;  // real href, let it go
+  e.preventDefault();
+  if (layouts.length === 0) return;
+  const st = posterStyle();
+  const drawn = posterCount;
+  els.posterDl.textContent = "Preparing…";
+  els.posterImg.toBlob((blob) => {
+    if (drawn !== posterCount) {              // poster changed meanwhile; user can click again
+      els.posterDl.textContent = "Download " + st.ext.toUpperCase();
+      return;
+    }
+    if (posterUrl) URL.revokeObjectURL(posterUrl);
+    posterUrl = URL.createObjectURL(blob);
+    els.posterDl.href = posterUrl;
+    els.posterDl.dataset.ready = String(drawn);
+    els.posterDl.textContent = "Download " + st.ext.toUpperCase();
+    els.posterNote.textContent += " · " + Math.round(blob.size / 1024) + " KB";
+    els.posterDl.click();                     // now navigates to the blob
+  }, st.mime, st.quality);
+});
 
 let urlTimer;
 const queueUrlSync = () => {
@@ -1361,12 +1396,13 @@ els.link.addEventListener("click", copyLink);
 els.prev.addEventListener("click", () => step(-1));
 els.next.addEventListener("click", () => step(1));
 els.poster.addEventListener("click", makePoster);
+/* Every poster setting redraws it in place. */
 for (const control of [els.posterBg, els.posterInk, els.posterQuality, els.names,
                        els.tagline, els.namesFont, els.namesSize, els.taglineFont,
-                       els.taglineSize, els.acrossLabel, els.downLabel]) {
-  control.addEventListener("input", () => { els.posterBox.hidden = true; });
+                       els.taglineSize]) {
+  control.addEventListener("input", queuePoster);
 }
-/* The clue heading labels also rename the on-screen list. */
+/* The clue heading labels rename the on-screen list, which redraws the poster. */
 for (const control of [els.acrossLabel, els.downLabel]) {
   control.addEventListener("input", () => { if (layouts.length) render(); });
 }
@@ -1379,13 +1415,13 @@ els.posterSize.addEventListener("input", () => {
     els.posterH.value = h;
   }
   updateSizeHint();
-  els.posterBox.hidden = true;
+  queuePoster();
 });
 for (const field of [els.posterW, els.posterH]) {
   field.addEventListener("input", () => {
     els.posterSize.value = "custom";
     updateSizeHint();
-    els.posterBox.hidden = true;
+    queuePoster();
   });
 }
 updateSizeHint();
