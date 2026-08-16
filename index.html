@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Crossword Generator</title>
+<script>
+  // Apply a remembered theme before the first paint so there is no flash.
+  try {
+    const t = localStorage.getItem("theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch {}
+</script>
 <style>
   :root {
     --bg: #f5f6f8;
@@ -21,8 +28,10 @@
     --warn-bg: #fef3c7;
     --radius: 10px;
   }
+  /* Dark palette applies when the OS asks for it (and the user has not
+     forced light), or when the user has forced dark. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #15171b;
       --panel: #1e2126;
       --ink: #e8eaed;
@@ -35,7 +44,47 @@
       --cross-bg: #2c3a58;
       --warn: #fbbf24;
       --warn-bg: #3a2f14;
+      color-scheme: dark;
     }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171b;
+    --panel: #1e2126;
+    --ink: #e8eaed;
+    --muted: #9aa1ad;
+    --line: #333840;
+    --accent: #5b8cff;
+    --accent-ink: #0d1017;
+    --cell-bg: #262a31;
+    --cell-line: #58606c;
+    --cross-bg: #2c3a58;
+    --warn: #fbbf24;
+    --warn-bg: #3a2f14;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
+
+  .theme {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    float: right;
+    margin: -2px 0 0 10px;
+  }
+  .theme button {
+    min-height: 30px;
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+  }
+  .theme button + button { border-left: 1px solid var(--line); }
+  .theme button[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--accent-ink);
   }
 
   * { box-sizing: border-box; }
@@ -316,6 +365,11 @@
 <body>
 <div class="app">
   <section class="card">
+    <div class="theme" role="group" aria-label="Color theme">
+      <button type="button" data-theme-pick="system">Auto</button>
+      <button type="button" data-theme-pick="light">Light</button>
+      <button type="button" data-theme-pick="dark">Dark</button>
+    </div>
     <h1>Crossword Generator</h1>
     <p class="sub">Enter your words, get interlocking layouts.</p>
 
@@ -408,6 +462,7 @@
       A clue ending in <b>?</b> is kept as a question. Anything else is treated as a
       sentence, and the answer is blanked out for you wherever it appears — or write
       your own <b>___</b>. Lines without a clue may list several words separated by commas.
+      Answers can be numbers too: <b>2019: The year we met.</b>
     </p>
     <p class="note">Layouts are searched with randomized restarts, so pressing Generate again gives you a fresh set of alternatives.</p>
   </section>
@@ -700,19 +755,20 @@ const normalize = (s) => s.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase()
 
 /* Hide the answer wherever it shows up in a sentence clue, so the clue does
    not give itself away. Matching is done on normalized tokens, so "Venice"
-   and "VENICE" both count. */
+   and "VENICE" both count, and so does "2019" against a numeric answer. */
 function blankAnswer(sentence, word) {
-  return sentence.replace(/[\p{L}\p{M}]+/gu, (token) =>
+  return sentence.replace(/[\p{L}\p{M}\p{N}]+/gu, (token) =>
     normalize(token) === word ? "_____" : token);
 }
 
-/* Each line is either "ANSWER: clue" or one or more bare words. */
+/* Each line is either "ANSWER: clue" or one or more bare words.
+   Answers may be letters, digits, or a mix (2019, 3RD, K2). */
 function parseEntries(text) {
   const seen = new Set();
   const out = [];
 
   const add = (raw, clueText) => {
-    const word = normalize(raw).replace(/[^\p{L}]/gu, "");
+    const word = normalize(raw).replace(/[^\p{L}\p{N}]/gu, "");
     if (word.length < 2 || seen.has(word)) return;
     seen.add(word);
 
@@ -731,7 +787,7 @@ function parseEntries(text) {
       add(split[1], split[2].trim());
     } else {
       // No clue on this line, so it may hold several words.
-      for (const token of (split ? split[1] : line).split(/[^\p{L}\p{M}]+/u)) add(token, null);
+      for (const token of (split ? split[1] : line).split(/[^\p{L}\p{M}\p{N}]+/u)) add(token, null);
     }
   }
   return out.slice(0, 80);
@@ -1404,6 +1460,28 @@ function restoreFromLink() {
 /* Pasting a link into an already open tab only changes the fragment, which is
    not a reload. replaceState does not fire this, so there is no loop. */
 window.addEventListener("hashchange", restoreFromLink);
+
+/* Theme: Auto follows the OS, Light/Dark override it and are remembered. */
+const themeButtons = document.querySelectorAll("[data-theme-pick]");
+function applyTheme(choice) {
+  if (choice === "light" || choice === "dark") {
+    document.documentElement.dataset.theme = choice;
+  } else {
+    delete document.documentElement.dataset.theme;
+    choice = "system";
+  }
+  try {
+    if (choice === "system") localStorage.removeItem("theme");
+    else localStorage.setItem("theme", choice);
+  } catch {}
+  for (const b of themeButtons) {
+    b.setAttribute("aria-pressed", String(b.dataset.themePick === choice));
+  }
+}
+for (const b of themeButtons) {
+  b.addEventListener("click", () => applyTheme(b.dataset.themePick));
+}
+applyTheme(document.documentElement.dataset.theme || "system");
 
 restoreFromLink();
 </script>
