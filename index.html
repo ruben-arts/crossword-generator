@@ -449,6 +449,12 @@
 
     <div class="row">
       <button class="primary" id="generate">Generate</button>
+      <select id="resultCount" class="text-input" style="flex:0 1 auto" aria-label="Number of layouts to keep">
+        <option value="12" selected>12 results</option>
+        <option value="24">24 results</option>
+        <option value="50">50 results</option>
+        <option value="100">100 results</option>
+      </select>
       <button id="link">Copy link</button>
       <button id="example">Example</button>
       <button id="clear">Clear</button>
@@ -465,7 +471,7 @@
       your own <b>___</b>. Lines without a clue may list several words separated by commas.
       Answers can be numbers too: <b>2019: The year we met.</b>
     </p>
-    <p class="note">Layouts are searched with randomized restarts, so pressing Generate again gives you a fresh set of alternatives.</p>
+    <p class="note">Layouts are searched with randomized restarts, so pressing Generate again gives you a fresh set of alternatives. Asking for more results searches a little longer; word lists with few shared letters may simply not have that many distinct layouts.</p>
   </section>
 
   <section class="card">
@@ -732,7 +738,7 @@ const els = {
   namesFont: $("namesFont"), namesSize: $("namesSize"),
   taglineFont: $("taglineFont"), taglineSize: $("taglineSize"),
   acrossLabel: $("acrossLabel"), downLabel: $("downLabel"),
-  acrossH: $("acrossH"), downH: $("downH"),
+  acrossH: $("acrossH"), downH: $("downH"), resultCount: $("resultCount"),
 };
 
 const EXAMPLE = [
@@ -857,6 +863,7 @@ function shareLink() {
     parts.push("a=" + encodeInput(els.acrossLabel.value));
   if (els.downLabel.value.trim() && els.downLabel.value !== "DOWN")
     parts.push("d=" + encodeInput(els.downLabel.value));
+  if (els.resultCount.value !== "12") parts.push("n=" + encodeInput(els.resultCount.value));
   return parts.length ? base + "#" + parts.join("&") : base;
 }
 
@@ -1054,10 +1061,20 @@ function run() {
   // not requestAnimationFrame: rAF never fires in a hidden tab, which would
   // leave a background-opened share link stuck on "Generating…".
   setTimeout(() => {
-    const { layouts: found, attempts, ms } = generate(words);
+    const wanted = Math.max(1, +els.resultCount.value || 12);
+    // More results need more distinct layouts, so the search budget grows
+    // with the request: 300 ms for 12, up to ~1.2 s for 100.
+    const budgetMs = Math.min(1200, 300 + (wanted - 12) * 10);
+    const { layouts: found, attempts, ms } = generate(words, {
+      budgetMs, maxResults: wanted, maxAttempts: 300 * wanted,
+    });
     layouts = found;
     index = 0;
-    els.time.textContent = attempts + " layouts tried in " + Math.round(ms) + " ms";
+    els.time.textContent =
+      attempts + " layouts tried in " + Math.round(ms) + " ms" +
+      (found.length < wanted
+        ? " · only " + found.length + " distinct layout" + (found.length === 1 ? "" : "s") + " exist"
+        : "");
     render();
     els.generate.disabled = false;
     els.generate.textContent = "Generate";
@@ -1485,6 +1502,8 @@ function restoreFromLink() {
       else if (key === "s") els.tagline.value = value;
       else if (key === "a") els.acrossLabel.value = value;
       else if (key === "d") els.downLabel.value = value;
+      else if (key === "n" && [...els.resultCount.options].some((o) => o.value === value))
+        els.resultCount.value = value;
     } catch {
       // Truncated or mangled link: keep whatever is already in the input.
     }
