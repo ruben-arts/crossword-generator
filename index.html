@@ -263,8 +263,6 @@
   tbody tr:hover td { background: var(--bg); }
   tbody tr.current td { background: var(--cross-bg); font-weight: 600; }
   tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  td.gap { color: var(--warn); }
-  td.none { color: var(--muted); }
 
   .clues {
     display: grid;
@@ -489,7 +487,7 @@
       <div class="board-wrap" id="boardWrap"><div class="board" id="board"></div></div>
       <div class="chips" id="unplaced"></div>
       <div class="results-table">
-        <h3>All results — pick one</h3>
+        <h3>All results — smallest grid first, then most crossings</h3>
         <div class="scroller">
           <table>
             <thead>
@@ -499,7 +497,6 @@
                 <th class="r">Crossings</th>
                 <th class="r">Grid</th>
                 <th class="r">Cells</th>
-                <th>Not placed</th>
               </tr>
             </thead>
             <tbody id="tbody"></tbody>
@@ -691,12 +688,16 @@ function buildLayout(words, rnd) {
   return { grid, unplaced: pending };
 }
 
-function scoreLayout(result) {
-  const g = result.grid;
-  return g.words.length * 1000
-       + g.crossings * 12
-       - g.width() * g.height() * 0.08
-       - Math.abs(g.width() - g.height()) * 1.5;
+/* Ranking, best first: a layout that fits more words always wins; among
+   equals the smallest grid comes first, then the most crossings, then the
+   squarer shape. This order drives the pager, the table and which layouts
+   the search keeps. */
+function compareLayouts(a, b) {
+  const ga = a.grid, gb = b.grid;
+  return gb.words.length - ga.words.length
+      || ga.width() * ga.height() - gb.width() * gb.height()
+      || gb.crossings - ga.crossings
+      || Math.abs(ga.width() - ga.height()) - Math.abs(gb.width() - gb.height());
 }
 
 /* Randomized restarts within a time budget; keeps the best distinct layouts. */
@@ -711,11 +712,10 @@ function generate(words, { budgetMs = 300, maxResults = 12, maxAttempts = 3000 }
     const result = buildLayout(words, rnd);
     const key = result.grid.rows().join("\n");
     if (seen.has(key)) continue;
-    result.score = scoreLayout(result);
     seen.set(key, result);
   }
 
-  const layouts = [...seen.values()].sort((a, b) => b.score - a.score).slice(0, maxResults);
+  const layouts = [...seen.values()].sort(compareLayouts).slice(0, maxResults);
   return { layouts, attempts, ms: performance.now() - started };
 }
 
@@ -925,9 +925,6 @@ function renderTable() {
       { text: String(grid.crossings), cls: "r" },
       { text: grid.width() + " × " + grid.height(), cls: "r" },
       { text: String(grid.cells.size), cls: "r" },
-      layout.unplaced.length
-        ? { text: layout.unplaced.join(", "), cls: "gap" }
-        : { text: "—", cls: "none" },
     ];
 
     for (const col of columns) {
