@@ -418,13 +418,20 @@
     <label>Poster style</label>
     <div class="row tight" style="margin-bottom:10px">
       <label class="mini">Paper <input type="color" id="posterBg" value="#ffffff"></label>
-      <label class="mini">Ink <input type="color" id="posterInk" value="#000000"></label>
+      <label class="mini">Header <input type="color" id="posterHeaderInk" value="#000000"></label>
+      <label class="mini">Clues <input type="color" id="posterClueInk" value="#000000"></label>
+      <label class="mini">Grid <input type="color" id="posterGridInk" value="#000000"></label>
+    </div>
+    <div class="row tight" style="margin-bottom:10px">
       <select id="posterSize" class="text-input" aria-label="Poster size preset">
         <option value="4000x3000" selected>Landscape · 50 × 38 cm</option>
         <option value="3000x4000">Portrait · 38 × 50 cm</option>
         <option value="3200x3200">Square · 40 × 40 cm</option>
         <option value="2400x1800">Small landscape · 30 × 23 cm</option>
         <option value="1800x2400">Small portrait · 23 × 30 cm</option>
+        <option value="2339x3307">A3 · 30 × 42 cm</option>
+        <option value="3307x4677">A2 · 42 × 59 cm</option>
+        <option value="4677x6614">A1 · 59 × 84 cm</option>
         <option value="custom">Custom…</option>
       </select>
       <select id="posterQuality" class="text-input" aria-label="Poster file format and quality">
@@ -732,7 +739,8 @@ const els = {
   blank: $("blank"), clues: $("clues"), across: $("across"), down: $("down"), tbody: $("tbody"),
   link: $("link"), linkOut: $("linkOut"), names: $("names"), tagline: $("tagline"),
   posterBox: $("posterBox"), posterImg: $("posterImg"), posterDl: $("posterDl"),
-  posterBg: $("posterBg"), posterInk: $("posterInk"), posterSize: $("posterSize"),
+  posterBg: $("posterBg"), posterHeaderInk: $("posterHeaderInk"),
+  posterClueInk: $("posterClueInk"), posterGridInk: $("posterGridInk"), posterSize: $("posterSize"),
   posterQuality: $("posterQuality"), posterNote: $("posterNote"),
   posterW: $("posterW"), posterH: $("posterH"), sizeHint: $("sizeHint"),
   namesFont: $("namesFont"), namesSize: $("namesSize"),
@@ -864,6 +872,10 @@ function shareLink() {
   if (els.downLabel.value.trim() && els.downLabel.value !== "DOWN")
     parts.push("d=" + encodeInput(els.downLabel.value));
   if (els.resultCount.value !== "12") parts.push("n=" + encodeInput(els.resultCount.value));
+  const colors = [els.posterBg, els.posterHeaderInk, els.posterClueInk, els.posterGridInk]
+    .map((el) => el.value.replace("#", "").toLowerCase());
+  if (colors.join("-") !== "ffffff-000000-000000-000000")
+    parts.push("c=" + encodeInput(colors.join("-")));
   return parts.length ? base + "#" + parts.join("&") : base;
 }
 
@@ -1120,7 +1132,11 @@ function clampPosterSize(w, h) {
   h = Math.min(8000, Math.max(500, Math.round(h) || 3000));
   if (w / h > 4) h = Math.ceil(w / 4);
   if (h / w > 4) w = Math.ceil(h / 4);
-  const AREA = 16e6;
+  // iOS Safari refuses canvases over ~16.7M px; desktop browsers go far
+  // higher, so only clamp hard where it would actually fail.
+  const iosLike = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const AREA = iosLike ? 16e6 : 48e6;
   if (w * h > AREA) {
     const s = Math.sqrt(AREA / (w * h));
     w = Math.floor(w * s);
@@ -1135,7 +1151,9 @@ function posterStyle() {
   return {
     w, h,
     bg: els.posterBg.value,
-    ink: els.posterInk.value,
+    headerInk: els.posterHeaderInk.value,
+    clueInk: els.posterClueInk.value,
+    gridInk: els.posterGridInk.value,
     mime: format === "jpeg" ? "image/jpeg" : "image/png",
     quality: quality ? parseFloat(quality) : undefined,
     ext: format === "jpeg" ? "jpg" : "png",
@@ -1303,7 +1321,7 @@ function drawPoster(layout, canvas = document.createElement("canvas")) {
   const VW = POSTER.vw, VH = st.h / scale, M = POSTER.margin;
   const innerW = VW - M * 2;
 
-  const headerBottom = drawPosterHeader(ctx, innerW, st.ink);
+  const headerBottom = drawPosterHeader(ctx, innerW, st.headerInk);
   const top = headerBottom + 110;
   const contentH = VH - M - top;
 
@@ -1323,16 +1341,16 @@ function drawPoster(layout, canvas = document.createElement("canvas")) {
   if (VW / VH >= 1.15) {
     // Landscape: clue column on the left, grid on the right.
     const clueW = innerW * 0.3;
-    drawPosterClues(ctx, sections, M, top, clueW, contentH, st.ink, false);
+    drawPosterClues(ctx, sections, M, top, clueW, contentH, st.clueInk, false);
     drawPosterGrid(ctx, grid, numbers, M + clueW + 100, top,
-                   innerW - clueW - 100, contentH, st.ink);
+                   innerW - clueW - 100, contentH, st.gridInk);
   } else {
     // Portrait and square: grid on top, Across and Down side by side below.
     const gridH = contentH * 0.52;
-    drawPosterGrid(ctx, grid, numbers, M, top, innerW, gridH, st.ink);
+    drawPosterGrid(ctx, grid, numbers, M, top, innerW, gridH, st.gridInk);
     const cluesTop = top + gridH + 70;
     const colW = (innerW - 120) / 2;
-    drawPosterClues(ctx, sections, M, cluesTop, colW, VH - M - cluesTop, st.ink, true);
+    drawPosterClues(ctx, sections, M, cluesTop, colW, VH - M - cluesTop, st.clueInk, true);
   }
   return canvas;
 }
@@ -1405,13 +1423,17 @@ els.names.addEventListener("input", queueUrlSync);
 els.tagline.addEventListener("input", queueUrlSync);
 els.acrossLabel.addEventListener("input", queueUrlSync);
 els.downLabel.addEventListener("input", queueUrlSync);
+for (const picker of [els.posterBg, els.posterHeaderInk, els.posterClueInk, els.posterGridInk]) {
+  picker.addEventListener("input", queueUrlSync);
+}
 els.generate.addEventListener("click", run);
 els.link.addEventListener("click", copyLink);
 els.prev.addEventListener("click", () => step(-1));
 els.next.addEventListener("click", () => step(1));
 els.poster.addEventListener("click", makePoster);
 /* Every poster setting redraws it in place. */
-for (const control of [els.posterBg, els.posterInk, els.posterQuality, els.names,
+for (const control of [els.posterBg, els.posterHeaderInk, els.posterClueInk,
+                       els.posterGridInk, els.posterQuality, els.names,
                        els.tagline, els.namesFont, els.namesSize, els.taglineFont,
                        els.taglineSize]) {
   control.addEventListener("input", queuePoster);
@@ -1501,6 +1523,12 @@ function restoreFromLink() {
       else if (key === "d") els.downLabel.value = value;
       else if (key === "n" && [...els.resultCount.options].some((o) => o.value === value))
         els.resultCount.value = value;
+      else if (key === "c") {
+        const targets = [els.posterBg, els.posterHeaderInk, els.posterClueInk, els.posterGridInk];
+        value.split("-").forEach((hex, i) => {
+          if (i < targets.length && /^[0-9a-f]{6}$/i.test(hex)) targets[i].value = "#" + hex;
+        });
+      }
     } catch {
       // Truncated or mangled link: keep whatever is already in the input.
     }
