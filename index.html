@@ -450,6 +450,8 @@
         <input type="number" id="posterH" class="text-input" value="3000" min="500" max="8000" step="50"
           style="flex:0 1 100px" aria-label="Poster height in pixels">
       </label>
+      <button type="button" class="icon" id="swapWH" title="Swap width and height"
+        aria-label="Swap width and height (landscape / portrait)">⇄</button>
       <span class="note" id="sizeHint" style="margin:0"></span>
     </div>
 
@@ -467,7 +469,8 @@
     </div>
     <input id="linkOut" class="link-out" readonly hidden aria-label="Shareable link">
     <p class="note">
-      <b>Copy link</b> puts the whole list — answers and clues — into a link you can
+      <b>Copy link</b> puts the whole setup — answers, clues, colors, fonts and
+      poster size — into a link you can
       send to yourself or a co-conspirator. Opening it restores the input and generates
       straight away. The address bar keeps up as you type, so a refresh never loses your work.
     </p>
@@ -743,7 +746,7 @@ const els = {
   posterBg: $("posterBg"), posterNamesInk: $("posterNamesInk"), posterTaglineInk: $("posterTaglineInk"),
   posterClueInk: $("posterClueInk"), posterGridInk: $("posterGridInk"), posterSize: $("posterSize"),
   posterQuality: $("posterQuality"), posterNote: $("posterNote"),
-  posterW: $("posterW"), posterH: $("posterH"), sizeHint: $("sizeHint"),
+  posterW: $("posterW"), posterH: $("posterH"), sizeHint: $("sizeHint"), swapWH: $("swapWH"),
   namesFont: $("namesFont"), namesSize: $("namesSize"),
   taglineFont: $("taglineFont"), taglineSize: $("taglineSize"),
   acrossLabel: $("acrossLabel"), downLabel: $("downLabel"),
@@ -878,6 +881,11 @@ function shareLink() {
     .map((el) => el.value.replace("#", "").toLowerCase());
   if (colors.join("-") !== "ffffff-000000-000000-000000-000000")
     parts.push("c=" + encodeInput(colors.join("-")));
+  const setup = [els.namesFont.value, els.namesSize.value,
+                 els.taglineFont.value, els.taglineSize.value,
+                 els.posterW.value, els.posterH.value, els.posterQuality.value].join("-");
+  if (setup !== "didone-210-script-130-4000-3000-png")
+    parts.push("p=" + encodeInput(setup));
   return parts.length ? base + "#" + parts.join("&") : base;
 }
 
@@ -1428,7 +1436,9 @@ els.tagline.addEventListener("input", queueUrlSync);
 els.acrossLabel.addEventListener("input", queueUrlSync);
 els.downLabel.addEventListener("input", queueUrlSync);
 for (const picker of [els.posterBg, els.posterNamesInk, els.posterTaglineInk,
-                      els.posterClueInk, els.posterGridInk]) {
+                      els.posterClueInk, els.posterGridInk, els.namesFont, els.namesSize,
+                      els.taglineFont, els.taglineSize, els.posterSize, els.posterQuality,
+                      els.resultCount]) {
   picker.addEventListener("input", queueUrlSync);
 }
 els.generate.addEventListener("click", run);
@@ -1463,8 +1473,22 @@ for (const field of [els.posterW, els.posterH]) {
     els.posterSize.value = "custom";
     updateSizeHint();
     queuePoster();
+    queueUrlSync();
   });
 }
+
+/* Landscape / portrait: swap the two fields, re-select a preset if one matches. */
+els.swapWH.addEventListener("click", () => {
+  const w = els.posterW.value;
+  els.posterW.value = els.posterH.value;
+  els.posterH.value = w;
+  const match = [...els.posterSize.options]
+    .find((o) => o.value === els.posterW.value + "x" + els.posterH.value);
+  els.posterSize.value = match ? match.value : "custom";
+  updateSizeHint();
+  queuePoster();
+  queueUrlSync();
+});
 updateSizeHint();
 els.blank.addEventListener("click", () => {
   showLetters = !showLetters;
@@ -1528,6 +1552,21 @@ function restoreFromLink() {
       else if (key === "d") els.downLabel.value = value;
       else if (key === "n" && [...els.resultCount.options].some((o) => o.value === value))
         els.resultCount.value = value;
+      else if (key === "p") {
+        const [nf, ns, tf, ts, pw, ph, q] = value.split("-");
+        if (HEAD_FONTS[nf]) els.namesFont.value = nf;
+        if (+ns) els.namesSize.value = ns;
+        if (HEAD_FONTS[tf]) els.taglineFont.value = tf;
+        if (+ts) els.taglineSize.value = ts;
+        if (+pw && +ph) {
+          els.posterW.value = pw;
+          els.posterH.value = ph;
+          const match = [...els.posterSize.options].find((o) => o.value === pw + "x" + ph);
+          els.posterSize.value = match ? match.value : "custom";
+          updateSizeHint();
+        }
+        if ([...els.posterQuality.options].some((o) => o.value === q)) els.posterQuality.value = q;
+      }
       else if (key === "c") {
         let hexes = value.split("-");
         // Links from before names/tagline split carry one header color for both.
