@@ -480,7 +480,7 @@
       your own <b>___</b>. Lines without a clue may list several words separated by commas.
       Answers can be numbers too: <b>2019: The year we met.</b>
     </p>
-    <p class="note">Layouts are searched with randomized restarts, so pressing Generate again gives you a fresh set of alternatives. Asking for more results searches a little longer; word lists with few shared letters may simply not have that many distinct layouts.</p>
+    <p class="note">The same answer list always produces the same layouts — regenerating, reloading, or opening a shared link anywhere shows identical results. Asking for more results searches a little longer; word lists with few shared letters may simply not have that many distinct layouts.</p>
   </section>
 
   <section class="card">
@@ -712,14 +712,25 @@ function compareLayouts(a, b) {
 }
 
 /* Randomized restarts within a time budget; keeps the best distinct layouts. */
-function generate(words, { budgetMs = 300, maxResults = 12, maxAttempts = 3000 } = {}) {
-  const started = performance.now();
-  const rnd = mulberry32((Math.random() * 2 ** 32) | 0);
-  const seen = new Map();
-  let attempts = 0;
+/* FNV-1a: turns the answer list into the search seed, so the same answers
+   always produce the same layouts — on any machine, any day. */
+function hashSeed(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
 
-  while (attempts < maxAttempts && performance.now() - started < budgetMs) {
-    attempts++;
+function generate(words, { seed = 1, maxResults = 12, maxAttempts = 3000 } = {}) {
+  const started = performance.now();
+  const rnd = mulberry32(seed);
+  const seen = new Map();
+
+  // A fixed attempt count, never a time budget: elapsed time varies by
+  // machine and would make shared links show different layouts elsewhere.
+  for (let attempts = 0; attempts < maxAttempts; attempts++) {
     const result = buildLayout(words, rnd);
     const key = result.grid.rows().join("\n");
     if (seen.has(key)) continue;
@@ -727,7 +738,7 @@ function generate(words, { budgetMs = 300, maxResults = 12, maxAttempts = 3000 }
   }
 
   const layouts = [...seen.values()].sort(compareLayouts).slice(0, maxResults);
-  return { layouts, attempts, ms: performance.now() - started };
+  return { layouts, attempts: maxAttempts, ms: performance.now() - started };
 }
 
 /* ---------------------------------------------------------------------------
@@ -1081,11 +1092,13 @@ function run() {
   // leave a background-opened share link stuck on "Generating…".
   setTimeout(() => {
     const wanted = Math.max(1, +els.resultCount.value || 12);
-    // More results need more distinct layouts, so the search budget grows
-    // with the request: 300 ms for 12, up to ~1.2 s for 100.
-    const budgetMs = Math.min(1200, 300 + (wanted - 12) * 10);
+    // Fixed attempt counts per result depth keep runs deterministic; the
+    // seed comes from the answers, so identical input gives identical output.
+    const attemptsFor = { 12: 3000, 24: 4500, 50: 6000, 100: 8500 };
     const { layouts: found, attempts, ms } = generate(words, {
-      budgetMs, maxResults: wanted, maxAttempts: 300 * wanted,
+      seed: hashSeed(words.join("\n")),
+      maxResults: wanted,
+      maxAttempts: attemptsFor[wanted] || 3000,
     });
     layouts = found;
     index = 0;
