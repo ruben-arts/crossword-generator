@@ -457,12 +457,10 @@
 
     <div class="row">
       <button class="primary" id="generate">Generate</button>
-      <select id="resultCount" class="text-input" style="flex:0 1 auto" aria-label="Number of layouts to keep">
-        <option value="12" selected>12 results</option>
-        <option value="24">24 results</option>
-        <option value="50">50 results</option>
-        <option value="100">100 results</option>
-      </select>
+      <label class="mini">Results
+        <input type="number" id="resultCount" class="text-input" value="12" min="1" max="200" step="1"
+          style="flex:0 1 80px" aria-label="Number of layouts to keep">
+      </label>
       <button id="link">Copy link</button>
       <button id="example">Example</button>
       <button id="clear">Clear</button>
@@ -1091,14 +1089,15 @@ function run() {
   // not requestAnimationFrame: rAF never fires in a hidden tab, which would
   // leave a background-opened share link stuck on "Generating…".
   setTimeout(() => {
-    const wanted = Math.max(1, +els.resultCount.value || 12);
-    // Fixed attempt counts per result depth keep runs deterministic; the
-    // seed comes from the answers, so identical input gives identical output.
-    const attemptsFor = { 12: 3000, 24: 4500, 50: 6000, 100: 8500 };
+    const wanted = Math.min(200, Math.max(1, Math.round(+els.resultCount.value) || 12));
+    els.resultCount.value = wanted;
+    // The attempt count is a pure function of the requested depth, so runs
+    // stay deterministic; the seed comes from the answers themselves.
+    const maxAttempts = Math.min(12000, 3000 + Math.max(0, wanted - 12) * 55);
     const { layouts: found, attempts, ms } = generate(words, {
       seed: hashSeed(words.join("\n")),
       maxResults: wanted,
-      maxAttempts: attemptsFor[wanted] || 3000,
+      maxAttempts,
     });
     layouts = found;
     index = 0;
@@ -1563,8 +1562,8 @@ function restoreFromLink() {
       else if (key === "s") els.tagline.value = value;
       else if (key === "a") els.acrossLabel.value = value;
       else if (key === "d") els.downLabel.value = value;
-      else if (key === "n" && [...els.resultCount.options].some((o) => o.value === value))
-        els.resultCount.value = value;
+      else if (key === "n" && +value >= 1 && +value <= 200)
+        els.resultCount.value = Math.round(+value);
       else if (key === "p") {
         const [nf, ns, tf, ts, pw, ph, q] = value.split("-");
         if (HEAD_FONTS[nf]) els.namesFont.value = nf;
