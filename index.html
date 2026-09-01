@@ -349,6 +349,19 @@
     color: var(--muted);
     margin: 0 0 8px;
   }
+  .poster-frame { position: relative; }
+  #posterOverlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    background: transparent !important;   /* the shared canvas rule paints white */
+    border: 0 !important;
+  }
+  .photo-tools { margin-top: 8px; }
+  .photo-tools input[type="range"] { flex: 1 1 120px; }
+
   .poster-box canvas {
     display: block;
     width: 100%;
@@ -455,6 +468,13 @@
       <span class="note" id="sizeHint" style="margin:0"></span>
     </div>
 
+    <label>Photos</label>
+    <div class="row tight" style="margin-bottom:10px">
+      <button id="addPhoto">Add photo</button>
+      <span class="note" style="margin:0">Drag on the poster to place; photos stay out of the link and are gone after a reload.</span>
+      <input type="file" id="photoFile" accept="image/*" multiple hidden>
+    </div>
+
     <div class="row">
       <button class="primary" id="generate">Generate</button>
       <label class="mini">Results
@@ -518,7 +538,17 @@
       </div>
       <div class="poster-box" id="posterBox" hidden>
         <h3>Poster</h3>
-        <canvas id="posterImg" role="img" aria-label="Generated crossword poster"></canvas>
+        <div class="poster-frame">
+          <canvas id="posterImg" role="img" aria-label="Generated crossword poster"></canvas>
+          <canvas id="posterOverlay" aria-hidden="true"></canvas>
+        </div>
+        <div class="row tight photo-tools" id="photoTools" hidden>
+          <button id="photoMode" title="Switch between moving the frame and adjusting the photo inside it">Adjust crop</button>
+          <label class="mini">Zoom
+            <input type="range" id="photoZoom" min="1" max="4" step="0.01" value="1" aria-label="Photo zoom inside frame">
+          </label>
+          <button id="photoRemove">Remove</button>
+        </div>
         <div class="row">
           <a id="posterDl" href="#" download="crossword-poster.png">Download</a>
           <span class="note" style="margin:0" id="posterNote"></span>
@@ -756,6 +786,9 @@ const els = {
   posterClueInk: $("posterClueInk"), posterGridInk: $("posterGridInk"), posterSize: $("posterSize"),
   posterQuality: $("posterQuality"), posterNote: $("posterNote"),
   posterW: $("posterW"), posterH: $("posterH"), sizeHint: $("sizeHint"), swapWH: $("swapWH"),
+  addPhoto: $("addPhoto"), photoFile: $("photoFile"), photoTools: $("photoTools"),
+  photoMode: $("photoMode"), photoZoom: $("photoZoom"), photoRemove: $("photoRemove"),
+  posterOverlay: $("posterOverlay"),
   namesFont: $("namesFont"), namesSize: $("namesSize"),
   taglineFont: $("taglineFont"), taglineSize: $("taglineSize"),
   acrossLabel: $("acrossLabel"), downLabel: $("downLabel"),
@@ -1345,6 +1378,9 @@ function drawPoster(layout, canvas = document.createElement("canvas")) {
   const VW = POSTER.vw, VH = st.h / scale, M = POSTER.margin;
   const innerW = VW - M * 2;
 
+  // Photos form the bottom layer: text and grid stay readable on top.
+  for (const ph of posterImages) drawPosterImage(ctx, ph);
+
   const headerBottom = drawPosterHeader(ctx, innerW, st);
   const top = headerBottom + 110;
   const contentH = VH - M - top;
@@ -1379,6 +1415,239 @@ function drawPoster(layout, canvas = document.createElement("canvas")) {
   return canvas;
 }
 
+/* ---------------------------------------------------------------------------
+   Poster photos: each one is a frame in virtual poster units. The photo
+   fills its frame like CSS object-fit cover; zoom and ox/oy pick the crop.
+   Session-only by design: photos never enter the share link.
+--------------------------------------------------------------------------- */
+const posterImages = [];
+let selectedPhoto = -1;
+let photoDragMode = "move";        // "move" the frame, or "crop" inside it
+
+function cropRect(ph) {
+  const { img, frame, zoom } = ph;
+  const natW = img.naturalWidth, natH = img.naturalHeight;
+  const aspect = frame.w / frame.h;
+  let sw = Math.min(natW, natH * aspect) / zoom;
+  let sh = sw / aspect;
+  if (sh > natH) { sh = natH / zoom; sw = sh * aspect; }
+  const sx = (natW - sw) * ph.ox;
+  const sy = (natH - sh) * ph.oy;
+  return { sx, sy, sw, sh };
+}
+
+function drawPosterImage(ctx, ph) {
+  const { sx, sy, sw, sh } = cropRect(ph);
+  ctx.drawImage(ph.img, sx, sy, sw, sh, ph.frame.x, ph.frame.y, ph.frame.w, ph.frame.h);
+}
+
+function addPosterImage(img) {
+  if (posterImages.length >= 6) return;
+  const st = posterStyle();
+  const VH = st.h / (st.w / POSTER.vw);
+  const w = POSTER.vw * 0.35;
+  const h = w * (img.naturalHeight / img.naturalWidth);
+  posterImages.push({
+    img,
+    frame: { x: (POSTER.vw - w) / 2, y: Math.max(200, (VH - h) / 2), w, h },
+    zoom: 1, ox: 0.5, oy: 0.5,
+  });
+  selectedPhoto = posterImages.length - 1;
+  photoDragMode = "move";
+  syncPhotoTools();
+  makePoster();
+}
+
+/* Overlay: selection chrome lives here, never in the downloadable canvas. */
+function overlayMetrics() {
+  const st = posterStyle();
+  const rect = els.posterImg.getBoundingClientRect();
+  return { rect, VW: POSTER.vw, VH: st.h / (st.w / POSTER.vw) };
+}
+
+function syncOverlay() {
+  const ov = els.posterOverlay;
+  const { rect, VW, VH } = overlayMetrics();
+  if (rect.width < 2) return;
+  ov.width = Math.round(rect.width * devicePixelRatio);
+  ov.height = Math.round(rect.height * devicePixelRatio);
+  const c = ov.getContext("2d");
+  c.clearRect(0, 0, ov.width, ov.height);
+  const ph = posterImages[selectedPhoto];
+  if (!ph) return;
+  const k = ov.width / VW;                     // virtual -> overlay px
+  const { x, y, w, h } = ph.frame;
+  c.strokeStyle = photoDragMode === "crop" ? "#e8621d" : "#2f6df6";
+  c.lineWidth = Math.max(2, 2 * devicePixelRatio);
+  c.setLineDash([8, 6]);
+  c.strokeRect(x * k, y * k, w * k, h * k);
+  c.setLineDash([]);
+  const hs = 7 * devicePixelRatio;
+  c.fillStyle = c.strokeStyle;
+  for (const [hx, hy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) {
+    c.fillRect(hx * k - hs, hy * k - hs, hs * 2, hs * 2);
+  }
+}
+
+function syncPhotoTools() {
+  const ph = posterImages[selectedPhoto];
+  els.photoTools.hidden = !ph;
+  if (ph) {
+    els.photoZoom.value = ph.zoom;
+    els.photoMode.textContent = photoDragMode === "move" ? "Adjust crop" : "Move frame";
+  }
+  syncOverlay();
+}
+
+function photoAt(vx, vy) {
+  for (let i = posterImages.length - 1; i >= 0; i--) {
+    const { x, y, w, h } = posterImages[i].frame;
+    if (vx >= x && vx <= x + w && vy >= y && vy <= y + h) return i;
+  }
+  return -1;
+}
+
+function cornerAt(ph, vx, vy, grabV) {
+  const { x, y, w, h } = ph.frame;
+  const corners = { nw: [x, y], ne: [x + w, y], sw: [x, y + h], se: [x + w, y + h] };
+  for (const [name, [cx, cy]] of Object.entries(corners)) {
+    if (Math.abs(vx - cx) < grabV && Math.abs(vy - cy) < grabV) return name;
+  }
+  return null;
+}
+
+/* One rAF-throttled repaint per burst of pointer moves. */
+let photoRepaintQueued = false;
+function repaintPhotos() {
+  if (photoRepaintQueued) return;
+  photoRepaintQueued = true;
+  requestAnimationFrame(() => {
+    photoRepaintQueued = false;
+    makePoster();
+    syncOverlay();
+  });
+}
+
+const pointers = new Map();       // active pointers for pinch
+let dragState = null;
+
+function toVirtual(e) {
+  const { rect, VW, VH } = overlayMetrics();
+  return {
+    vx: ((e.clientX - rect.left) / rect.width) * VW,
+    vy: ((e.clientY - rect.top) / rect.height) * VH,
+    grabV: (14 / rect.width) * VW,
+  };
+}
+
+els.posterOverlay.addEventListener("pointerdown", (e) => {
+  if (layouts.length === 0) return;
+  const { vx, vy, grabV } = toVirtual(e);
+  pointers.set(e.pointerId, { vx, vy });
+  if (pointers.size === 2) { dragState = { kind: "pinch", startZoom: posterImages[selectedPhoto]?.zoom || 1 }; return; }
+
+  const ph = posterImages[selectedPhoto];
+  const corner = ph && cornerAt(ph, vx, vy, grabV);
+  if (corner) {
+    dragState = { kind: "resize", corner, start: { ...ph.frame }, vx, vy };
+  } else {
+    const hit = photoAt(vx, vy);
+    if (hit !== selectedPhoto) { selectedPhoto = hit; photoDragMode = "move"; syncPhotoTools(); }
+    if (hit < 0) { dragState = null; return; }
+    const f = posterImages[hit].frame;
+    dragState = photoDragMode === "crop"
+      ? { kind: "crop", vx, vy }
+      : { kind: "move", dx: vx - f.x, dy: vy - f.y };
+  }
+  els.posterOverlay.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+
+els.posterOverlay.addEventListener("pointermove", (e) => {
+  if (!pointers.has(e.pointerId) || !dragState) return;
+  const pos = toVirtual(e);
+  const prev = pointers.get(e.pointerId);
+  pointers.set(e.pointerId, { vx: pos.vx, vy: pos.vy });
+  const ph = posterImages[selectedPhoto];
+  if (!ph) return;
+
+  if (dragState.kind === "pinch" && pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    const dist = Math.hypot(a.vx - b.vx, a.vy - b.vy);
+    if (dragState.baseDist === undefined) dragState.baseDist = dist;
+    ph.zoom = Math.min(4, Math.max(1, dragState.startZoom * (dist / dragState.baseDist)));
+    els.photoZoom.value = ph.zoom;
+  } else if (dragState.kind === "move") {
+    ph.frame.x = pos.vx - dragState.dx;
+    ph.frame.y = pos.vy - dragState.dy;
+  } else if (dragState.kind === "resize") {
+    const f = ph.frame, s = dragState.start, min = 250;
+    if (dragState.corner.includes("e")) f.w = Math.max(min, s.w + (pos.vx - dragState.vx));
+    if (dragState.corner.includes("s")) f.h = Math.max(min, s.h + (pos.vy - dragState.vy));
+    if (dragState.corner.includes("w")) {
+      f.w = Math.max(min, s.w - (pos.vx - dragState.vx));
+      f.x = s.x + s.w - f.w;
+    }
+    if (dragState.corner.includes("n")) {
+      f.h = Math.max(min, s.h - (pos.vy - dragState.vy));
+      f.y = s.y + s.h - f.h;
+    }
+  } else if (dragState.kind === "crop") {
+    const { sw, sh } = cropRect(ph);
+    const { naturalWidth: natW, naturalHeight: natH } = ph.img;
+    const slackX = natW - sw, slackY = natH - sh;
+    if (slackX > 0) ph.ox = Math.min(1, Math.max(0, ph.ox - ((pos.vx - prev.vx) * (sw / ph.frame.w)) / slackX));
+    if (slackY > 0) ph.oy = Math.min(1, Math.max(0, ph.oy - ((pos.vy - prev.vy) * (sh / ph.frame.h)) / slackY));
+  }
+  repaintPhotos();
+});
+
+for (const type of ["pointerup", "pointercancel"]) {
+  els.posterOverlay.addEventListener(type, (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2 && dragState?.kind === "pinch") dragState = null;
+    if (pointers.size === 0) dragState = null;
+  });
+}
+
+els.posterOverlay.addEventListener("wheel", (e) => {
+  const ph = posterImages[selectedPhoto];
+  if (!ph) return;
+  e.preventDefault();
+  ph.zoom = Math.min(4, Math.max(1, ph.zoom * (e.deltaY < 0 ? 1.05 : 0.95)));
+  els.photoZoom.value = ph.zoom;
+  repaintPhotos();
+}, { passive: false });
+
+els.addPhoto.addEventListener("click", () => els.photoFile.click());
+els.photoFile.addEventListener("change", () => {
+  for (const file of els.photoFile.files) {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { addPosterImage(img); URL.revokeObjectURL(url); };
+    img.src = url;
+  }
+  els.photoFile.value = "";
+});
+els.photoMode.addEventListener("click", () => {
+  photoDragMode = photoDragMode === "move" ? "crop" : "move";
+  syncPhotoTools();
+});
+els.photoZoom.addEventListener("input", () => {
+  const ph = posterImages[selectedPhoto];
+  if (!ph) return;
+  ph.zoom = +els.photoZoom.value;
+  repaintPhotos();
+});
+els.photoRemove.addEventListener("click", () => {
+  if (selectedPhoto < 0) return;
+  posterImages.splice(selectedPhoto, 1);
+  selectedPhoto = posterImages.length - 1;
+  syncPhotoTools();
+  makePoster();
+});
+window.addEventListener("resize", () => syncOverlay());
+
 /* The poster follows the puzzle: any change to the shown layout or to a
    poster setting redraws it straight onto the on-page canvas, which takes a
    few milliseconds. The slow part, encoding to a PNG/JPEG file (~1 s), only
@@ -1400,6 +1669,7 @@ function makePoster() {
     Math.round((st.w / 200) * 2.54) + " × " + Math.round((st.h / 200) * 2.54) +
     " cm at print quality";
   els.posterBox.hidden = false;
+  syncOverlay();
 }
 
 /* Coalesce bursts (typing, clicking through the table) into one draw. */
