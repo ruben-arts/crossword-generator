@@ -422,6 +422,10 @@
       <label class="mini">Paper <input type="color" id="posterBg" value="#ffffff"></label>
       <label class="mini">Clues <input type="color" id="posterClueInk" value="#000000"></label>
       <label class="mini">Grid <input type="color" id="posterGridInk" value="#000000"></label>
+      <label class="mini">Lines
+        <input type="range" id="gridLine" min="0.4" max="3" step="0.1" value="1"
+          style="flex:1 1 90px" aria-label="Grid line thickness" title="Grid line thickness">
+      </label>
     </div>
     <div class="row tight" style="margin-bottom:10px">
       <select id="posterSize" class="text-input" aria-label="Poster size preset">
@@ -754,7 +758,8 @@ const els = {
   link: $("link"), linkOut: $("linkOut"), names: $("names"), tagline: $("tagline"),
   posterBox: $("posterBox"), posterImg: $("posterImg"), posterDl: $("posterDl"),
   posterBg: $("posterBg"), posterNamesInk: $("posterNamesInk"), posterTaglineInk: $("posterTaglineInk"),
-  posterClueInk: $("posterClueInk"), posterGridInk: $("posterGridInk"), posterSize: $("posterSize"),
+  posterClueInk: $("posterClueInk"), posterGridInk: $("posterGridInk"), gridLine: $("gridLine"),
+  posterSize: $("posterSize"),
   posterQuality: $("posterQuality"), posterNote: $("posterNote"),
   posterW: $("posterW"), posterH: $("posterH"), sizeHint: $("sizeHint"), swapWH: $("swapWH"),
   namesFont: $("namesFont"), namesSize: $("namesSize"),
@@ -893,8 +898,9 @@ function shareLink() {
     parts.push("c=" + encodeInput(colors.join("-")));
   const setup = [els.namesFont.value, els.namesSize.value,
                  els.taglineFont.value, els.taglineSize.value,
-                 els.posterW.value, els.posterH.value, els.posterQuality.value].join("-");
-  if (setup !== "didone-210-script-130-4000-3000-png")
+                 els.posterW.value, els.posterH.value, els.posterQuality.value,
+                 els.gridLine.value].join("-");
+  if (setup !== "didone-210-script-130-4000-3000-png-1")
     parts.push("p=" + encodeInput(setup));
   return parts.length ? base + "#" + parts.join("&") : base;
 }
@@ -1179,6 +1185,7 @@ function posterStyle() {
     taglineInk: els.posterTaglineInk.value,
     clueInk: els.posterClueInk.value,
     gridInk: els.posterGridInk.value,
+    gridLine: clampNum(els.gridLine.value, 0.4, 3, 1),
     mime: format === "jpeg" ? "image/jpeg" : "image/png",
     quality: quality ? parseFloat(quality) : undefined,
     ext: format === "jpeg" ? "jpg" : "png",
@@ -1304,7 +1311,7 @@ function drawPosterClues(ctx, sections, x, top, colW, colH, ink, sideBySide) {
   }
 }
 
-function drawPosterGrid(ctx, grid, numbers, x, top, areaW, areaH, ink) {
+function drawPosterGrid(ctx, grid, numbers, x, top, areaW, areaH, ink, lineScale = 1) {
   const cols = grid.width(), rows = grid.height();
   const cell = Math.min(170, areaW / cols, areaH / rows);
   const gx = x + (areaW - cell * cols) / 2;
@@ -1313,7 +1320,7 @@ function drawPosterGrid(ctx, grid, numbers, x, top, areaW, areaH, ink) {
   // Line width lives in virtual units: keep it at least ~1.4 real pixels,
   // or thin borders dissolve when a small output size scales everything down.
   const realScale = ctx.getTransform().a;
-  ctx.lineWidth = Math.max(3, cell * 0.04, 1.4 / realScale);
+  ctx.lineWidth = Math.max(Math.max(3, cell * 0.04) * lineScale, 1.4 / realScale);
   ctx.strokeStyle = ink;
   ctx.fillStyle = ink;
   for (const cellData of grid.cells.values()) {
@@ -1369,11 +1376,11 @@ function drawPoster(layout, canvas = document.createElement("canvas")) {
     const clueW = innerW * 0.3;
     drawPosterClues(ctx, sections, M, top, clueW, contentH, st.clueInk, false);
     drawPosterGrid(ctx, grid, numbers, M + clueW + 100, top,
-                   innerW - clueW - 100, contentH, st.gridInk);
+                   innerW - clueW - 100, contentH, st.gridInk, st.gridLine);
   } else {
     // Portrait and square: grid on top, Across and Down side by side below.
     const gridH = contentH * 0.52;
-    drawPosterGrid(ctx, grid, numbers, M, top, innerW, gridH, st.gridInk);
+    drawPosterGrid(ctx, grid, numbers, M, top, innerW, gridH, st.gridInk, st.gridLine);
     const cluesTop = top + gridH + 70;
     const colW = (innerW - 120) / 2;
     drawPosterClues(ctx, sections, M, cluesTop, colW, VH - M - cluesTop, st.clueInk, true);
@@ -1452,7 +1459,7 @@ els.downLabel.addEventListener("input", queueUrlSync);
 for (const picker of [els.posterBg, els.posterNamesInk, els.posterTaglineInk,
                       els.posterClueInk, els.posterGridInk, els.namesFont, els.namesSize,
                       els.taglineFont, els.taglineSize, els.posterSize, els.posterQuality,
-                      els.resultCount]) {
+                      els.resultCount, els.gridLine]) {
   picker.addEventListener("input", queueUrlSync);
 }
 els.generate.addEventListener("click", run);
@@ -1462,7 +1469,8 @@ els.next.addEventListener("click", () => step(1));
 els.poster.addEventListener("click", makePoster);
 /* Every poster setting redraws it in place. */
 for (const control of [els.posterBg, els.posterNamesInk, els.posterTaglineInk,
-                       els.posterClueInk, els.posterGridInk, els.posterQuality, els.names,
+                       els.posterClueInk, els.posterGridInk, els.gridLine,
+                       els.posterQuality, els.names,
                        els.tagline, els.namesFont, els.namesSize, els.taglineFont,
                        els.taglineSize]) {
   control.addEventListener("input", queuePoster);
@@ -1567,7 +1575,8 @@ function restoreFromLink() {
       else if (key === "n" && +value >= 1 && +value <= 200)
         els.resultCount.value = Math.round(+value);
       else if (key === "p") {
-        const [nf, ns, tf, ts, pw, ph, q] = value.split("-");
+        const [nf, ns, tf, ts, pw, ph, q, gl] = value.split("-");
+        if (+gl >= 0.4 && +gl <= 3) els.gridLine.value = gl;
         if (HEAD_FONTS[nf]) els.namesFont.value = nf;
         if (+ns) els.namesSize.value = ns;
         if (HEAD_FONTS[tf]) els.taglineFont.value = tf;
